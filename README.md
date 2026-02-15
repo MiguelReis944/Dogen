@@ -28,7 +28,7 @@ Ele conversa naturalmente, entende comandos e responde com uma voz amigável —
 
 * Python 3.8 ou superior
 * Microfone funcionando
-* Ollama instalado com o modelo Mistral
+* Ollama instalado com o modelo Mistral 7B
 
 ---
 
