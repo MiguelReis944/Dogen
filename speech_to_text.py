@@ -6,7 +6,12 @@ def listen():
 
     with sr.Microphone() as source:
         print("Ouvindo...")
-        audio = r.listen(source)
+        audio = r.listen(
+            source,
+            timeout=None,
+            phrase_time_limit=None
+        )
+
 
     try:
         text = r.recognize_google(audio, language="pt-BR,en-US")
@@ -14,3 +19,4 @@ def listen():
         return text.lower()
     except:
         return ""
+
