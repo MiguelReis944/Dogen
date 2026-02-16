@@ -1,6 +1,6 @@
 # Dogen - Desktop Oriented General Execution Navigator
 
-**V** é um assistente pessoal inteligente que funciona **100% offline** no seu computador.
+**Dogen** é um assistente pessoal inteligente que funciona **100% offline** no seu computador.
 Ele conversa naturalmente, entende comandos e responde com uma voz amigável — tudo rodando localmente, sem depender da internet.
 
 ---
