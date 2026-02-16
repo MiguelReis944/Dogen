@@ -30,7 +30,7 @@ class Cores:
         """Formata a mensagem do assistente V."""
         linhas = texto.split('\n')
 
-        formatado = f"{Cores.AZUL}{Cores.BOLD}V:{Cores.RESET}\n"
+        formatado = f"{Cores.AZUL}{Cores.BOLD}Dogen:{Cores.RESET}\n"
 
         for linha in linhas:
             formatado += f"   {Cores.AMARELO}{linha}{Cores.RESET}\n"

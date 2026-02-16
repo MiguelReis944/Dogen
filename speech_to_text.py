@@ -1,7 +1,7 @@
 import speech_recognition as sr
 from terminal_style import Cores
 
-def listen():
+async def listen():
     estilo = Cores
 
     r = sr.Recognizer()

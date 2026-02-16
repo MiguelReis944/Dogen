@@ -1,6 +1,6 @@
 import pyttsx3
 
-def speak(text):
+async def speak(text):
 
     engine = pyttsx3.init()
 

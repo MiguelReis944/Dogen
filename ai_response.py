@@ -4,7 +4,7 @@ chat_history = [
     {
         "role": "system",
         "content": """
-Você é V, um assistente pessoal amigável e descontraído.
+Você é Dogen(Desktop Oriented General Execution Navigator), um assistente pessoal amigável e descontraído.
 Características:
 - Fala como um amigo, não como um robô
 - Respostas curtas e diretas (máximo 2-3 frases)
@@ -27,7 +27,7 @@ Regras:
     }
 ]
 
-def ask_ai(text):
+async def ask_ai(text):
 
     chat_history.append({
         "role": "user",

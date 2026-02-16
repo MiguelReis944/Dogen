@@ -2,7 +2,7 @@ import os
 import subprocess
 
 
-def handle_command(text):
+async def handle_command(text):
 
     if "crie uma pasta" in text:
         # Remove a parte "crie uma pasta" do texto
