@@ -34,7 +34,7 @@ Ele conversa naturalmente, entende comandos e responde com uma voz amigável —
 
 ## 📦 Instalação
 
-# Nome do Projeto (Dogen)
+# Dogen (Desktop Oriented General Execution Navigator)
 
 DOGEN é um assistente virtual local desenvolvido em Python, focado em automação de tarefas, monitoramento do sistema e execução de comandos personalizados por voz ou texto — tudo rodando offline.
 
