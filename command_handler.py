@@ -1,15 +1,26 @@
 import os
 import subprocess
+import webbrowser
 
 
 async def handle_command(text):
 
-    if "crie uma pasta" in text:
+    #comandos no explorador de arquivos
+
+    if "criar pasta" in text:
         # Remove a parte "crie uma pasta" do texto
-        name = text.replace("crie uma pasta", "").strip()
-        name = name.replace("chamada", "").strip()
-        name = name.replace("com o nome", "").strip()
-        name = name.replace("de nome", "").strip()
+        name = text.lower()
+
+        name = name.replace("criar pasta", "")
+        name = name.replace("crie uma pasta", "")
+        name = name.replace("crie pasta", "")
+        name = name.replace("criar uma pasta", "")
+        name = name.replace("chamada", "")
+        name = name.replace("com o nome", "")
+        name = name.replace("de nome", "")
+
+        name = name.strip()
+
     
         # Se não sobrou nada, usa nome padrão
         if not name:
@@ -18,26 +29,41 @@ async def handle_command(text):
         os.makedirs(name, exist_ok=True)
         return f"Pasta '{name}' criada"
 
-    if "abra code" in text:
-        subprocess.Popen("code")
-        return "Abrindo VS Code"
-    
-    if "abra música" in text:
-        caminho = r"C:\Users\Pichau\AppData\Roaming\Spotify\Spotify.exe"
-        subprocess.Popen([caminho])
-        return "Abrindo Spotify"
-    
-    if "abra as notas" in text:
-        subprocess.Popen("notepad.exe")
-        return "Bloco de notas aberto"
-
-    if "abra a pasta" in text:
-        subprocess.Popen(f'explorer "{os.getcwd()}"')
-        return "Pasta atual aberta"
-    
     if "listar arquivos" in text:
         arquivos = os.listdir()
         return f"Arquivos: {', '.join(arquivos[:10])}"
+    
+    if "abrir pasta" in text:
+        subprocess.Popen(f'explorer "{os.getcwd()}"')
+        return "Pasta atual aberta"
+    
+    if "abrir bloco de notas" in text:
+        subprocess.Popen("notepad.exe")
+        return "Bloco de notas aberto"
+    
+    #comandos para abrir sites
+
+    if "abrir google" in text:
+        webbrowser.open("https://google.com")
+        return "Abrindo google.com"
+
+    if "abrir youtube" in text:
+        webbrowser.open("https://www.youtube.com/")
+        return "Abrindo youtube"
+    
+    if "abrir whatsapp" in text:
+        webbrowser.open("https://web.whatsapp.com/")
+        return "Abrindo whatsapp"
+    
+    if "abrir github" in text:
+        webbrowser.open("https://github.com/")
+        return "Abrindo github"
+    
+    if "abrir seu superior" in text:
+        webbrowser.open("https://chatgpt.com/")
+        return "Abrindo chatGPT"
+
+    #informações uteis
     
     if "que dia é hoje" in text:
         from datetime import datetime
@@ -48,6 +74,8 @@ async def handle_command(text):
         from datetime import datetime
         agora = datetime.now().strftime("%H:%M:%S")
         return f"Agora são {agora}"
+    
+    #estatisticas do sistema e do Dogen
     
     if "sistema" in text:
         import platform
@@ -104,11 +132,9 @@ async def handle_command(text):
         import platform
         import psutil
         from datetime import datetime
-        from assistant import numero_comandos
 
     
         # Informações da IA
-        comandos_executados = numero_comandos
         pasta_atual = os.getcwd()
     
         # Ping (teste de conexão)
@@ -131,12 +157,12 @@ async def handle_command(text):
         return f"""
          STATUS DA IA
          
+         Nome: Dogen
          Modelo: {modelo}
          Linguagem: Python 3.10
          Pasta: {pasta_atual}
-         Comandos: {comandos_executados}
          Rede: {status_rede}
-         Memória: {memoria_ia}
+         Uso memória: {memoria_ia}
          CPU: {psutil.cpu_percent()}%
         """    
         

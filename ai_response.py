@@ -1,51 +1,18 @@
 import ollama
+from memory_manager import filtrar_memoria_para_ia
 
-chat_history = [
-    {
-        "role": "system",
-        "content": """
-Você é Dogen(Desktop Oriented General Execution Navigator), um assistente pessoal amigável e descontraído.
-Características:
-- Fala como um amigo, não como um robô
-- Respostas curtas e diretas (máximo 2-3 frases)
-- Usa linguagem casual e brasileira
-- Chama o usuário pelo nome Reis
-- Faz perguntas para manter a conversa
-- Tem senso de humor leve
-- É prestativo sem ser formal
+async def ask_ai(text, chat_history):
 
-Regras:
-- Não se apresentar repetidamente
-- Não falar Olá Reis
-- Não usar linguagem técnica excessiva
-- Evitar respostas genéricas
-- Ser natural como uma conversa de WhatsApp
-- Responder sempre em português do Brasil
-- Se não souber algo, admite naturalmente
-- Não usar emojis
-"""
-    },
-]
-
-async def ask_ai(text):
-
-    chat_history.append({
-        "role": "user",
-        "content": text
-    })
+    mensagens = filtrar_memoria_para_ia(chat_history)
 
     response = ollama.chat(
         model="mistral",
-        messages=chat_history
+        messages=mensagens
     )
 
     reply = response['message']['content']
 
-    chat_history.append({
-        "role": "assistant",
-        "content": reply
-    })
-
     return reply
+
 
 

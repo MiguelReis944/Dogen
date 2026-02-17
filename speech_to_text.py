@@ -16,7 +16,8 @@ async def listen():
 
 
     try:
-        text = r.recognize_google(audio, language="pt-BR,en-US")
+        text = r.recognize_google(audio, language="pt-BR,en-US").lower()
+
         print(estilo.usuario(text))
         return text.lower()
     except:
