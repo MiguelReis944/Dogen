@@ -31,7 +31,9 @@ def load_config(path: str | Path) -> AppConfig:
     path = Path(path)
     if not path.exists():
         return AppConfig()
-    return AppConfig(**json.loads(path.read_text(encoding="utf-8")))
+    known = {f.name for f in AppConfig.__dataclass_fields__.values()}
+    data = {k: v for k, v in json.loads(path.read_text(encoding="utf-8")).items() if k in known}
+    return AppConfig(**data)
 
 
 def save_config(config: AppConfig, path: str | Path) -> None:

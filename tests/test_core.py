@@ -64,3 +64,46 @@ def test_vad_stops_after_silence_but_not_before_speech():
     assert not detector.feed([0.0] * 5)
     assert not detector.feed([0.2] * 5)
     assert detector.feed([0.0] * 5)
+
+
+def test_vad_noise_floor_only_updated_during_pre_speech_silence():
+    """Speech samples must not contaminate the noise floor estimate."""
+    detector = VoiceDetector(threshold=0.001, silence_duration_sec=1.0, sample_rate=100)
+    # Pre-speech silence with known RMS ≈ 0.01
+    for _ in range(10):
+        detector.feed([0.01] * 10)
+    floor_after_silence = detector._noise_floor
+    # Feed loud speech samples
+    detector.feed([1.0] * 10)
+    # Noise floor must not have moved up from the speech block
+    assert detector._noise_floor == floor_after_silence
+
+
+def test_vad_noise_floor_adapts_to_quiet_background():
+    """Over many silent blocks the noise floor converges toward the actual RMS."""
+    detector = VoiceDetector(threshold=100.0, silence_duration_sec=1.0, sample_rate=100)
+    rms = 0.05
+    for _ in range(200):
+        detector.feed([rms] * 10)
+    assert abs(detector._noise_floor - rms) < 0.01
+
+
+def test_config_unknown_keys_are_silently_ignored(tmp_path):
+    import json
+    path = tmp_path / "settings.json"
+    path.write_text(json.dumps({"ollama_model": "llama3", "unknown_future_key": 42}))
+    cfg = load_config(path)
+    assert cfg.ollama_model == "llama3"
+
+
+def test_database_session_per_day(tmp_path):
+    """latest_session_id and set_setting enable one session per calendar day."""
+    path = tmp_path / "conversations.db"
+    with Database(path) as db:
+        assert db.get_setting("session_date") is None
+        db.set_setting("session_date", "2026-09-18")
+        db.add_message("session-today", "user", "hi", "mistral", 100)
+        assert db.get_setting("session_date") == "2026-09-18"
+        # Simulating a new day: overwrite the date
+        db.set_setting("session_date", "2026-09-19")
+        assert db.get_setting("session_date") == "2026-09-19"

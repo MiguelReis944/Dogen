@@ -5,6 +5,5 @@ scipy>=1.10,<2
 openai-whisper
 ollama
 coqui-tts
-torch
-torchaudio
+# torch e torchaudio sao instalados separadamente no start.bat com o index correto
 pytest>=8,<10
