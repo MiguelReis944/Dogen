@@ -5,7 +5,8 @@
   "tts_model": "tts_models/en/ljspeech/tacotron2-DDC",
   "mic_device": null,
   "speaker_device": null,
-  "vad_threshold": 0.02,
+  "vad_threshold": 0.012,
   "silence_duration_sec": 1.3,
-  "context_size": 10
+  "context_size": 20,
+  "input_mode": "vad"
 }

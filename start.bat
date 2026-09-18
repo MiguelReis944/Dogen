@@ -7,16 +7,35 @@ set "PYTHON=%VENV%\Scripts\python.exe"
 set "PREFLIGHT=%ROOT%scripts\preflight.py"
 set "WHISPER_MODEL=small.en"
 set "TTS_MODEL=tts_models/en/ljspeech/tacotron2-DDC"
+:: Para voz masculina (requer eSpeak-NG instalado): tts_models/en/sam/tacotron-DDC
 set "OLLAMA_MODEL=mistral"
 
-:: ── 0. Visual C++ Redistributable (exigido pelo PyTorch) ─────────────────
-echo [0/5] Verificando Visual C++ Redistributable...
+:: ── 0. Pre-requisitos de sistema ────────────────────────────────────────────
+echo [0/5] Verificando pre-requisitos de sistema...
+
+:: Visual C++ Redistributable (exigido pelo PyTorch)
 winget install --id Microsoft.VCRedist.2015+.x64 --silent --accept-package-agreements --accept-source-agreements >nul 2>&1
 if errorlevel 1 (
-    echo    winget falhou - verifique se ja esta instalado ou instale manualmente:
-    echo    https://aka.ms/vs/17/release/vc_redist.x64.exe
+    echo    VC++ Redist: verifique se ja esta instalado ou baixe em https://aka.ms/vs/17/release/vc_redist.x64.exe
 ) else (
     echo    Visual C++ Redistributable ok.
+)
+
+:: eSpeak-NG (phonemizer exigido pelo modelo TTS masculino)
+where espeak-ng >nul 2>&1
+if errorlevel 1 (
+    echo    Instalando eSpeak-NG...
+    winget install --id eSpeak.eSpeakNG --silent --accept-package-agreements --accept-source-agreements >nul 2>&1
+    :: Adiciona ao PATH da sessao atual caso o winget nao tenha atualizado ainda
+    if exist "C:\Program Files\eSpeak NG\espeak-ng.exe" (
+        set "PATH=%PATH%;C:\Program Files\eSpeak NG"
+        echo    eSpeak-NG instalado.
+    ) else (
+        echo    AVISO: eSpeak-NG nao encontrado automaticamente.
+        echo    Instale manualmente em https://espeak-ng.org/ e reinicie o bat.
+    )
+) else (
+    echo    eSpeak-NG ok.
 )
 
 :: ── 1. Ambiente virtual ────────────────────────────────────────────────────

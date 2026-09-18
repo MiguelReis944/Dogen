@@ -14,11 +14,13 @@ class AppConfig:
     ollama_model: str = "mistral"
     whisper_model: str = "base"
     tts_model: str = "tts_models/en/ljspeech/tacotron2-DDC"
+    tts_speaker: str | None = None  # required for multi-speaker models (e.g. VCTK)
     mic_device: int | None = None
     speaker_device: int | None = None
     vad_threshold: float = 0.02
     silence_duration_sec: float = 2.0
     context_size: int = 10
+    input_mode: str = "vad"  # "vad" | "ptt"
     system_prompt: str = SYSTEM_PROMPT
 
     def __post_init__(self):

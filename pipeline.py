@@ -10,6 +10,14 @@ from nlp.llm import ConversationContext
 # Split on sentence-ending punctuation, keeping the delimiter with the left side.
 _SENTENCE_END_RE = re.compile(r'(?<=[.!?])\s+')
 
+# Strip any annotation block the LLM might produce: [Anything: ...].
+# Matches [Word(s): content] — keeps the text visible in the UI but silent in TTS.
+_COACHING_BLOCK_RE = re.compile(r'\[[A-Z][^:\[\]\n]*:.*?\]\s*', re.DOTALL)
+
+
+def _for_tts(text: str) -> str:
+    return _COACHING_BLOCK_RE.sub('', text).strip()
+
 _DONE = object()
 
 
@@ -79,7 +87,10 @@ class ProcessingPipeline:
             if cancelled():
                 llm_thread.join(timeout=2)
                 raise TurnCancelled()
-            for wav, sr in self.synthesizer.synthesize_stream(item):
+            spoken = _for_tts(item)
+            if not spoken:
+                continue  # correction-only fragment, show in UI but skip TTS
+            for wav, sr in self.synthesizer.synthesize_stream(spoken):
                 if cancelled():
                     llm_thread.join(timeout=2)
                     raise TurnCancelled()
