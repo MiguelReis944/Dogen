@@ -1,4 +1,5 @@
 import sqlite3
+import pytest
 
 from nlp.llm import ConversationContext
 from storage.db import Database
@@ -29,10 +30,25 @@ def test_database_persists_and_reloads_session(tmp_path):
         assert connection.execute("select count(*) from conversations").fetchone()[0] == 2
 
 
+def test_corrupt_database_is_backed_up_and_recreated(tmp_path):
+    path = tmp_path / "conversations.db"
+    path.write_bytes(b"not a SQLite database")
+    with Database(path) as db:
+        assert db.recent_messages("new", 10) == []
+    backups = list(tmp_path.glob("conversations.db.corrupt-*"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == b"not a SQLite database"
+
+
 def test_config_round_trip(tmp_path):
     path = tmp_path / "settings.json"
     save_config(AppConfig(ollama_model="custom"), path)
     assert load_config(path).ollama_model == "custom"
+
+
+def test_external_ollama_host_is_rejected():
+    with pytest.raises(ValueError, match="localhost"):
+        AppConfig(ollama_host="https://remote.example.com")
 
 
 def test_vad_stops_after_silence_but_not_before_speech():

@@ -18,6 +18,7 @@ def main():
     config = load_config(root / "settings.json")
     logging.basicConfig(filename=root / "app.log", level=logging.INFO)
     app = QApplication(sys.argv)
+    app.setStyleSheet((root / "ui" / "styles.qss").read_text(encoding="utf-8"))
     try:
         import sounddevice as sd
         sd.check_input_settings(device=config.mic_device, samplerate=16000, channels=1)

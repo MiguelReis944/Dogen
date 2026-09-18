@@ -1,6 +1,8 @@
 """Local Whisper transcription. Model files must be cached before launch."""
 
 from pathlib import Path
+from hashlib import sha256
+import os
 
 
 class Transcriber:
@@ -10,8 +12,13 @@ class Transcriber:
         models = whisper._MODELS
         if model_name in models:
             filename = models[model_name].split("/")[-1]
-            if not (Path.home() / ".cache" / "whisper" / filename).is_file():
+            cache_root = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "whisper"
+            model_path = cache_root / filename
+            if not model_path.is_file():
                 raise FileNotFoundError(f"Whisper model {model_name!r} is not cached. See docs/SETUP.md")
+            expected_digest = models[model_name].split("/")[-2]
+            if len(expected_digest) == 64 and sha256(model_path.read_bytes()).hexdigest() != expected_digest:
+                raise ValueError(f"Cached Whisper model {model_name!r} failed checksum verification")
         self.model = whisper.load_model(model_name)
 
     def transcribe(self, audio):

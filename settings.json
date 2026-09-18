@@ -1,0 +1,11 @@
+{
+  "ollama_host": "http://localhost:11434",
+  "ollama_model": "mistral",
+  "whisper_model": "base",
+  "tts_model": "tts_models/en/ljspeech/tacotron2-DDC",
+  "mic_device": null,
+  "speaker_device": null,
+  "vad_threshold": 0.02,
+  "silence_duration_sec": 2.0,
+  "context_size": 10
+}

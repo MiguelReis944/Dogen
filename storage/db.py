@@ -1,6 +1,7 @@
 """SQLite persistence for Dogen sessions."""
 
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 from storage.models import Message
@@ -13,7 +14,18 @@ class Database:
 
     def __enter__(self):
         self.connection = sqlite3.connect(self.path)
-        self.init_schema()
+        try:
+            self.connection.execute("PRAGMA quick_check").fetchone()
+            self.init_schema()
+        except sqlite3.DatabaseError as exc:
+            self.connection.close()
+            self.connection = None
+            if isinstance(exc, sqlite3.OperationalError) or not self.path.exists():
+                raise
+            backup = self.path.with_name(self.path.name + ".corrupt-" + datetime.now().strftime("%Y%m%d%H%M%S%f"))
+            self.path.rename(backup)
+            self.connection = sqlite3.connect(self.path)
+            self.init_schema()
         return self
 
     def __exit__(self, *_):

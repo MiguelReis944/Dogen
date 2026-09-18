@@ -26,7 +26,8 @@ class Recorder:
 
         def callback(indata, frames, time_info, status):
             if status:
-                raise RuntimeError(str(status))
+                blocks.put(RuntimeError(str(status)))
+                return
             blocks.put(indata[:, 0].copy())
 
         with sd.InputStream(samplerate=self.sample_rate, channels=1, dtype="float32", blocksize=1600,
@@ -36,6 +37,8 @@ class Recorder:
                     chunk = blocks.get(timeout=0.1)
                 except Empty:
                     continue
+                if isinstance(chunk, Exception):
+                    raise chunk
                 chunks.append(chunk)
                 if detector.feed(chunk) or (not detector.heard_voice and monotonic() - start >= 5):
                     break

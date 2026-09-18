@@ -9,9 +9,13 @@ from scipy.io import wavfile
 class Synthesizer:
     def __init__(self, model_name):
         from TTS.api import TTS
+        from TTS.utils.manage import ModelManager
         import torch
 
-        self.tts = TTS(model_name=model_name, gpu=torch.cuda.is_available())
+        model_dir = Path(ModelManager(verbose=False).output_prefix) / model_name.replace("/", "--")
+        if not model_dir.is_dir():
+            raise FileNotFoundError(f"Coqui model {model_name!r} is not cached. See docs/SETUP.md")
+        self.tts = TTS(model_name).to("cuda" if torch.cuda.is_available() else "cpu")
 
     def synthesize(self, text):
         with NamedTemporaryFile(suffix=".wav", delete=False) as target:

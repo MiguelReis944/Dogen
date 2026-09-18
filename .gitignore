@@ -1,21 +1,15 @@
-# Python cache
 __pycache__/
-*.py[cod]
-*$py.class
-
-# Virtual env
+.pytest_cache/
+.venv/
 venv/
 .env/
-
-# OS
+*.py[cod]
+*$py.class
 .DS_Store
 Thumbs.db
-
-# VS Code
 .vscode/
-
-# Logs
 *.log
-
-#historico
 history.json
+conversations.db
+conversations.db-*
+conversations.db.corrupt-*

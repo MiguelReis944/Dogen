@@ -3,6 +3,7 @@
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from urllib.parse import urlparse
 
 from nlp.llm import SYSTEM_PROMPT
 
@@ -19,6 +20,11 @@ class AppConfig:
     silence_duration_sec: float = 2.0
     context_size: int = 10
     system_prompt: str = SYSTEM_PROMPT
+
+    def __post_init__(self):
+        url = urlparse(self.ollama_host)
+        if url.scheme != "http" or url.hostname not in {"localhost", "127.0.0.1", "::1"}:
+            raise ValueError("Ollama host must be an http://localhost address for offline use")
 
 
 def load_config(path: str | Path) -> AppConfig:
