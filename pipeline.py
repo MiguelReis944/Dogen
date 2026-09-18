@@ -118,7 +118,8 @@ class ProcessingPipeline:
                 if cancelled():
                     llm_thread.join(timeout=2)
                     raise TurnCancelled()
-                self.player.play(wav, sr, cancelled)
+                self.player.play(wav, sr, cancelled,
+                                 on_volume=lambda rms: emit("speech_volume", str(rms)))
 
         llm_thread.join(timeout=5)
         if llm_errors:

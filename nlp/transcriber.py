@@ -5,6 +5,13 @@ from hashlib import sha256
 import os
 
 
+def _looks_like_silence(segments: list[dict], threshold: float = 0.6) -> bool:
+    """Whisper hallucinates stock phrases ("Thank you for watching") on pure
+    silence or background noise. If every segment thinks it's non-speech,
+    trust that over the transcribed text."""
+    return bool(segments) and all(seg.get("no_speech_prob", 0.0) > threshold for seg in segments)
+
+
 class Transcriber:
     def __init__(self, model_name="base"):
         import whisper
@@ -22,4 +29,7 @@ class Transcriber:
         self.model = whisper.load_model(model_name)
 
     def transcribe(self, audio):
-        return self.model.transcribe(audio, language="en", fp16=False)["text"].strip()
+        result = self.model.transcribe(audio, language="en", fp16=False)
+        if _looks_like_silence(result.get("segments") or []):
+            return ""
+        return result["text"].strip()

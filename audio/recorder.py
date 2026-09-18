@@ -15,6 +15,7 @@ class Recorder:
         self.device = device
         self.threshold = threshold
         self.silence_duration_sec = silence_duration_sec
+        self._noise_floor = 0.0  # carried across turns so the room's noise floor keeps adapting
 
     def record(self, cancelled, on_volume=None, stop_fn=None):
         """Record audio until end of utterance.
@@ -25,7 +26,8 @@ class Recorder:
         import sounddevice as sd
 
         blocks: Queue = Queue()
-        detector = VoiceDetector(self.threshold, self.silence_duration_sec, self.sample_rate)
+        detector = VoiceDetector(self.threshold, self.silence_duration_sec, self.sample_rate,
+                                 initial_noise_floor=self._noise_floor)
         chunks = []
         start = monotonic()
 

@@ -23,6 +23,7 @@ from nlp.llm import (SCENARIOS, ConversationContext, OllamaClient,
 from nlp.synthesizer import Synthesizer
 from nlp.transcriber import Transcriber
 from pipeline import ProcessingPipeline, TurnCancelled
+from ui.pet_widget import PetWidget
 from ui.session_summary_dialog import SessionSummaryDialog
 from ui.settings_dialog import SettingsDialog
 from ui.vocab_dialog import VocabDialog
@@ -73,6 +74,7 @@ class ConversationWorker(QThread):
     ready             = pyqtSignal()
     turn_completed    = pyqtSignal(str, str, int)
     volume_level      = pyqtSignal(float)
+    speech_level      = pyqtSignal(float)   # TTS playback amplitude, drives the pet's mouth
 
     def __init__(self, config, context, model, pipeline=None, parent=None):
         super().__init__(parent)
@@ -171,6 +173,11 @@ class ConversationWorker(QThread):
             self.status_message.emit(value)
         elif kind == "empty":
             self.error.emit(value)
+        elif kind == "speech_volume":
+            try:
+                self.speech_level.emit(float(value))
+            except ValueError:
+                pass
 
     # ── main loop ──────────────────────────────────────────────────────────────
 
@@ -326,6 +333,11 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(6)
 
+        # ── pet body ───────────────────────────────────────────────────────────
+        self.pet = PetWidget()
+        self.pet.setMaximumHeight(170)
+        layout.addWidget(self.pet)
+
         # ── top row ────────────────────────────────────────────────────────────
         top_row = QHBoxLayout()
         top_row.setSpacing(8)
@@ -337,17 +349,21 @@ class MainWindow(QMainWindow):
         self.stats_label.setStyleSheet("color: #888; font-size: 12px;")
         top_row.addWidget(self.stats_label)
 
-        self.flow_btn = QPushButton("Coaching ✓")
+        self.flow_btn = QPushButton("Mode: Coaching")
         self.flow_btn.setCheckable(True)
-        self.flow_btn.setToolTip("Switch between Coaching (with corrections) and Fluency (conversation only) mode")
-        self.flow_btn.setFixedWidth(110)
+        self.flow_btn.setToolTip(
+            "Coaching: Dogen points out grammar mistakes.\n"
+            "Fluency: pure conversation, no corrections.\n"
+            "Click to switch."
+        )
+        self.flow_btn.setMinimumWidth(140)
         self.flow_btn.toggled.connect(self._on_flow_toggled)
         top_row.addWidget(self.flow_btn)
 
         top_row.addWidget(QLabel("Voice:"))
         self.voice_combo = QComboBox()
         self.voice_combo.addItems(list(VOICE_MODELS.keys()))
-        self.voice_combo.setFixedWidth(100)
+        self.voice_combo.setMinimumWidth(110)
         self.voice_combo.currentTextChanged.connect(self._on_voice_changed)
         top_row.addWidget(self.voice_combo)
 
@@ -390,15 +406,15 @@ class MainWindow(QMainWindow):
         self.scenario_combo.currentTextChanged.connect(self._on_scenario_changed)
         bottom_row.addWidget(self.scenario_combo, stretch=1)
 
-        vocab_btn = QPushButton("Vocab")
+        vocab_btn = QPushButton("Vocabulary")
         vocab_btn.setToolTip("Show corrections collected during practice")
-        vocab_btn.setFixedWidth(70)
+        vocab_btn.setMinimumWidth(90)
         vocab_btn.clicked.connect(self._show_vocab)
         bottom_row.addWidget(vocab_btn)
 
         new_session_btn = QPushButton("New Session")
-        new_session_btn.setToolTip("End this session and start a fresh one")
-        new_session_btn.setFixedWidth(100)
+        new_session_btn.setToolTip("Save a summary of this session and start a fresh, empty chat")
+        new_session_btn.setMinimumWidth(120)
         new_session_btn.clicked.connect(self._end_session)
         bottom_row.addWidget(new_session_btn)
 
@@ -420,10 +436,12 @@ class MainWindow(QMainWindow):
         self._review_countdown = QLabel("")
         self._review_countdown.setStyleSheet("color: #888; font-size: 12px; min-width: 28px;")
         confirm_btn = QPushButton("✓ Send")
-        confirm_btn.setFixedWidth(70)
+        confirm_btn.setToolTip("Send this transcript to Dogen now")
+        confirm_btn.setMinimumWidth(80)
         confirm_btn.clicked.connect(self._on_confirm_transcript)
         cancel_btn = QPushButton("✕")
-        cancel_btn.setFixedWidth(30)
+        cancel_btn.setToolTip("Discard this turn — don't send it")
+        cancel_btn.setMinimumWidth(36)
         cancel_btn.clicked.connect(self._on_cancel_transcript)
         review_layout.addWidget(QLabel("Heard:"))
         review_layout.addWidget(self._review_edit, stretch=1)
@@ -551,7 +569,7 @@ class MainWindow(QMainWindow):
 
     def _on_flow_toggled(self, fluency_mode: bool):
         self._corrections_on = not fluency_mode
-        self.flow_btn.setText("Fluency ✓" if fluency_mode else "Coaching ✓")
+        self.flow_btn.setText("Mode: Fluency" if fluency_mode else "Mode: Coaching")
         self._apply_system_prompt()
 
     def _on_scenario_changed(self, scenario_key: str):
@@ -595,20 +613,9 @@ class MainWindow(QMainWindow):
 
     def _render_history(self):
         self.history.clear()
-        messages = self.db.recent_all_messages(100)
-        last_date = None
+        # Scoped to the current session only — a new session must start blank.
+        messages = self.db.recent_messages(self.session_id, 200)
         for message in messages:
-            date = message.created_at[:10] if message.created_at else None
-            if date and date != last_date:
-                if last_date is not None:
-                    self.history.append(
-                        '<p style="text-align:center;color:#555;margin:4px 0">────────────────</p>'
-                    )
-                self.history.append(
-                    f'<p style="text-align:center;color:#888;font-size:12px;margin:2px 0">'
-                    f'{date}</p>'
-                )
-                last_date = date
             self.history.append(self._format_message(message.role, message.content))
         self._assistant_open = False
 
@@ -629,12 +636,13 @@ class MainWindow(QMainWindow):
         self.worker.transcribed.connect(self._on_transcribed)
         self.worker.transcript_review.connect(self._on_transcript_review)
         self.worker.response_chunk.connect(self._on_chunk)
-        self.worker.audio_playing.connect(lambda: self.status.setText("Playing audio..."))
+        self.worker.audio_playing.connect(self._on_audio_playing)
         self.worker.error.connect(self._on_error)
         self.worker.ready.connect(self._on_ready)
         self.worker.turn_completed.connect(self._on_completed)
         self.worker.finished.connect(self._on_finished)
         self.worker.volume_level.connect(self._on_volume)
+        self.worker.speech_level.connect(self.pet.set_volume)
         self.start_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         self._last_error = None
@@ -656,18 +664,26 @@ class MainWindow(QMainWindow):
         self._last_error = None
         self.vol_bar.setVisible(True)
         self.vol_bar.setValue(0)
+        self.pet.set_state("listening")
         label = "Hold Space — recording..." if self.config.input_mode == "ptt" else "Recording..."
         self.status.setText(label)
 
     def _on_waiting_for_ptt(self):
         self.vol_bar.setVisible(False)
+        self.pet.set_state("idle")
         self.status.setText("Press Space to speak...")
 
     def _on_volume(self, rms: float):
         self.vol_bar.setValue(min(100, int(rms * _VOL_SCALE)))
+        self.pet.set_volume(rms)
+
+    def _on_audio_playing(self):
+        self.pet.set_state("speaking")
+        self.status.setText("Playing audio...")
 
     def _on_ready(self):
         self.vol_bar.setVisible(False)
+        self.pet.set_state("idle")
         if self._last_error is None:
             self.status.setText("Ready for next turn")
 
@@ -707,6 +723,7 @@ class MainWindow(QMainWindow):
         self.history.append(f"You: {text}")
         self._append("\nDogen: ")
         self._assistant_open = True
+        self.pet.set_state("thinking")
         self.status.setText("Thinking...")
 
     def _on_chunk(self, text):
@@ -716,6 +733,7 @@ class MainWindow(QMainWindow):
         if self._assistant_open:
             self._render_history()
         self._last_error = text
+        self.pet.set_state("idle")
         self.status.setText(text)
 
     def _on_completed(self, user_text, assistant_text, latency_ms):
@@ -739,6 +757,7 @@ class MainWindow(QMainWindow):
         if self._assistant_open:
             self._render_history()
         self.vol_bar.setVisible(False)
+        self.pet.set_state("idle")
         self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.model_combo.setEnabled(True)

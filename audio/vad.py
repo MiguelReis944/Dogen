@@ -7,13 +7,14 @@ class VoiceDetector:
     # ponytail: adaptive noise floor via EMA; upgrade to webrtcvad if false-positives persist in noisy environments
     _ALPHA = 0.05  # smoothing factor for background noise estimate
 
-    def __init__(self, threshold: float, silence_duration_sec: float, sample_rate: int):
+    def __init__(self, threshold: float, silence_duration_sec: float, sample_rate: int,
+                 initial_noise_floor: float = 0.0):
         self.base_threshold = threshold
         self.silence_duration_sec = silence_duration_sec
         self.sample_rate = sample_rate
         self.heard_voice = False
         self.silent_samples = 0
-        self._noise_floor = 0.0
+        self._noise_floor = initial_noise_floor
 
     def feed(self, samples) -> bool:
         block = np.asarray(samples, dtype=np.float32)

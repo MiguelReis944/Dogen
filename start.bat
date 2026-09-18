@@ -5,10 +5,20 @@ set "ROOT=%~dp0"
 set "VENV=%ROOT%.venv"
 set "PYTHON=%VENV%\Scripts\python.exe"
 set "PREFLIGHT=%ROOT%scripts\preflight.py"
+set "SETUP_MARKER=%VENV%\.dogen_setup_ok"
 set "WHISPER_MODEL=small.en"
 set "TTS_MODEL=tts_models/en/ljspeech/tacotron2-DDC"
 :: Para voz masculina (requer eSpeak-NG instalado): tts_models/en/sam/tacotron-DDC
 set "OLLAMA_MODEL=mistral"
+
+:: Passe "reinstall" como argumento para forcar a checagem completa de pacotes de novo
+:: (ex: start.bat reinstall) apos mudar requirements.txt ou suspeitar de ambiente corrompido.
+if /i "%~1"=="reinstall" (
+    del /f /q "%SETUP_MARKER%" >nul 2>&1
+    echo Forcando reinstalacao completa de dependencias...
+)
+
+if exist "%SETUP_MARKER%" goto :after_setup
 
 :: ── 0. Pre-requisitos de sistema ────────────────────────────────────────────
 echo [0/5] Verificando pre-requisitos de sistema...
@@ -86,6 +96,12 @@ if errorlevel 1 (
 )
 echo    PyTorch funcional. Para GPU, veja docs/SETUP.md.
 
+:: Marca o ambiente Python como pronto: nas proximas execucoes os passos 0-2
+:: (winget + pip, os mais lentos) sao pulados inteiramente. Rode "start.bat
+:: reinstall" para refazer essa checagem depois de mudar requirements.txt.
+echo ok > "%SETUP_MARKER%"
+
+:after_setup
 :: ── 3. Whisper ─────────────────────────────────────────────────────────────
 echo [3/5] Verificando modelo Whisper (%WHISPER_MODEL%)...
 "%PYTHON%" "%PREFLIGHT%" check-whisper "%WHISPER_MODEL%" 2>nul

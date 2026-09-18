@@ -81,7 +81,11 @@ class OllamaClient:
 
     def generate(self, messages: list[dict[str, str]], on_chunk: Callable[[str], None], cancelled: Callable[[], bool]) -> str:
         chunks = []
-        for item in self.client.chat(model=self.model, messages=messages, stream=True):
+        # Ollama defaults to a 2048-token context window on most models, which
+        # silently truncates history once context_size grows past ~10 turns —
+        # the model then "forgets" earlier turns without any error surfacing.
+        for item in self.client.chat(model=self.model, messages=messages, stream=True,
+                                     options={"num_ctx": 4096}):
             if cancelled():
                 break
             msg = item.message if hasattr(item, "message") else item.get("message", {})

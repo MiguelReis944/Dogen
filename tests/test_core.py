@@ -1,7 +1,8 @@
 import sqlite3
 import pytest
 
-from nlp.llm import ConversationContext
+from nlp.llm import ConversationContext, OllamaClient
+from nlp.transcriber import _looks_like_silence
 from storage.db import Database
 from utils.config import AppConfig, load_config, save_config
 from audio.vad import VoiceDetector
@@ -94,6 +95,60 @@ def test_config_unknown_keys_are_silently_ignored(tmp_path):
     path.write_text(json.dumps({"ollama_model": "llama3", "unknown_future_key": 42}))
     cfg = load_config(path)
     assert cfg.ollama_model == "llama3"
+
+
+def test_session_full_stats_counts_turns_and_corrections(tmp_path):
+    path = tmp_path / "conversations.db"
+    with Database(path) as db:
+        db.add_turn("s1", "I goed to school", "Nice! [Correction: I goed → I went]", "mistral", 100)
+        db.add_turn("s1", "Hello", "Hi there", "mistral", 100)
+        stats = db.session_full_stats("s1")
+        assert stats["turns"] == 2
+        assert stats["corrections"] == 1
+        assert len(stats["vocab"]) == 1
+        assert stats["vocab"][0].original == "I goed"
+        assert stats["vocab"][0].corrected == "I went"
+        assert stats["minutes"] >= 0
+
+
+def test_vad_seeds_from_initial_noise_floor():
+    """Recorder carries the learned noise floor into the next turn's detector."""
+    detector = VoiceDetector(threshold=100.0, silence_duration_sec=1.0, sample_rate=100,
+                             initial_noise_floor=0.05)
+    assert detector._noise_floor == 0.05
+
+
+def test_transcriber_treats_all_non_speech_segments_as_silence():
+    segments = [{"no_speech_prob": 0.9}, {"no_speech_prob": 0.75}]
+    assert _looks_like_silence(segments) is True
+
+
+def test_transcriber_keeps_text_when_any_segment_is_speech():
+    segments = [{"no_speech_prob": 0.9}, {"no_speech_prob": 0.1}]
+    assert _looks_like_silence(segments) is False
+
+
+def test_transcriber_empty_segments_is_not_silence():
+    assert _looks_like_silence([]) is False
+
+
+def test_ollama_client_sets_context_window(monkeypatch):
+    """Ollama defaults to a 2048-token window; without num_ctx, long conversation
+    history silently truncates instead of erroring."""
+    calls = []
+
+    class FakeOllamaClient:
+        def __init__(self, host, timeout):
+            pass
+
+        def chat(self, model, messages, stream, options=None):
+            calls.append(options)
+            return iter([])
+
+    monkeypatch.setattr("ollama.Client", FakeOllamaClient)
+    client = OllamaClient("http://localhost:11434", "mistral")
+    client.generate([], lambda token: None, lambda: False)
+    assert calls == [{"num_ctx": 4096}]
 
 
 def test_database_session_per_day(tmp_path):
