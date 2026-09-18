@@ -5,21 +5,26 @@ import logging
 import re
 import threading
 import time
+import uuid
 
 import numpy as np
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt5.QtGui import QKeySequence, QTextCursor
-from PyQt5.QtWidgets import (QAction, QComboBox, QHBoxLayout, QLabel,
-                              QMainWindow, QMenuBar, QProgressBar, QPushButton,
-                              QTextEdit, QVBoxLayout, QWidget, QFileDialog)
+from PyQt5.QtWidgets import (QAction, QComboBox, QFileDialog, QHBoxLayout,
+                              QLabel, QLineEdit, QMainWindow, QMenuBar,
+                              QProgressBar, QPushButton, QTextEdit,
+                              QVBoxLayout, QWidget)
 
 from audio.player import Player
 from audio.recorder import Recorder
+from nlp.filler_words import count_fillers, highlight_fillers_html
 from nlp.llm import (SCENARIOS, ConversationContext, OllamaClient,
                      build_system_prompt)
 from nlp.synthesizer import Synthesizer
 from nlp.transcriber import Transcriber
 from pipeline import ProcessingPipeline, TurnCancelled
+from ui.session_summary_dialog import SessionSummaryDialog
+from ui.settings_dialog import SettingsDialog
 from ui.vocab_dialog import VocabDialog
 
 # Maps voice selector label → Coqui model name.
@@ -57,16 +62,17 @@ class ModelFetcher(QThread):
 
 
 class ConversationWorker(QThread):
-    status_message = pyqtSignal(str)
+    status_message    = pyqtSignal(str)
     recording_started = pyqtSignal()
-    waiting_for_ptt = pyqtSignal()
-    transcribed = pyqtSignal(str)
-    response_chunk = pyqtSignal(str)
-    audio_playing = pyqtSignal()
-    error = pyqtSignal(str)
-    ready = pyqtSignal()
-    turn_completed = pyqtSignal(str, str, int)
-    volume_level = pyqtSignal(float)
+    waiting_for_ptt   = pyqtSignal()
+    transcribed       = pyqtSignal(str)
+    transcript_review = pyqtSignal(str)   # needs user confirmation before LLM
+    response_chunk    = pyqtSignal(str)
+    audio_playing     = pyqtSignal()
+    error             = pyqtSignal(str)
+    ready             = pyqtSignal()
+    turn_completed    = pyqtSignal(str, str, int)
+    volume_level      = pyqtSignal(float)
 
     def __init__(self, config, context, model, pipeline=None, parent=None):
         super().__init__(parent)
@@ -76,10 +82,12 @@ class ConversationWorker(QThread):
         self._prebuilt_pipeline = pipeline
         self.built_pipeline = None
         self._ptt_start_event = threading.Event()
-        self._ptt_stop_event = threading.Event()
-        self._barge_in = False
+        self._ptt_stop_event  = threading.Event()
+        self._barge_in        = False
         self._playback_active = False
         self._barge_in_thread: threading.Thread | None = None
+        self._confirm_event   = threading.Event()
+        self._confirmed_text  = ""
 
     # ── cancellation ───────────────────────────────────────────────────────────
 
@@ -96,6 +104,25 @@ class ConversationWorker(QThread):
 
     def end_ptt(self):
         self._ptt_stop_event.set()
+
+    def confirm_transcript(self, text: str):
+        self._confirmed_text = text
+        self._confirm_event.set()
+
+    def cancel_transcript(self):
+        self._confirmed_text = ""
+        self._confirm_event.set()
+
+    def _make_confirm_fn(self):
+        def _confirm(transcript: str) -> str:
+            self._confirmed_text = transcript
+            self._confirm_event.clear()
+            self.transcript_review.emit(transcript)
+            while not self._cancelled():
+                if self._confirm_event.wait(timeout=0.1):
+                    return self._confirmed_text
+            return ""
+        return _confirm
 
     # ── barge-in ───────────────────────────────────────────────────────────────
 
@@ -236,9 +263,11 @@ class ConversationWorker(QThread):
                 started = time.monotonic()
 
                 try:
+                    confirm_fn = self._make_confirm_fn() if self.config.review_transcript else None
                     result = pipeline.run(
                         samples, self.context, self._emit_progress,
                         self._cancelled_or_barge_in,
+                        confirm_fn=confirm_fn,
                     )
                     if result:
                         self.turn_completed.emit(*result, int((time.monotonic() - started) * 1000))
@@ -273,7 +302,7 @@ class ConversationWorker(QThread):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, config, db, context, session_id):
+    def __init__(self, config, db, context, session_id, settings_path=None):
         super().__init__()
         self.setWindowTitle("Dogen")
         self.resize(780, 640)
@@ -281,12 +310,14 @@ class MainWindow(QMainWindow):
         self.db = db
         self.context = context
         self.session_id = session_id
+        self.settings_path = settings_path
         self.worker = None
         self._pipeline = None
         self._assistant_open = False
         self._closing = False
         self._last_error = None
         self._corrections_on = True
+        self._session_fillers = 0  # running filler word count for current session
 
         self._build_menu()
 
@@ -365,12 +396,47 @@ class MainWindow(QMainWindow):
         vocab_btn.clicked.connect(self._show_vocab)
         bottom_row.addWidget(vocab_btn)
 
+        new_session_btn = QPushButton("New Session")
+        new_session_btn.setToolTip("End this session and start a fresh one")
+        new_session_btn.setFixedWidth(100)
+        new_session_btn.clicked.connect(self._end_session)
+        bottom_row.addWidget(new_session_btn)
+
         self.start_button = QPushButton("Start Recording")
         self.stop_button = QPushButton("Stop")
         self.stop_button.setEnabled(False)
         bottom_row.addWidget(self.start_button)
         bottom_row.addWidget(self.stop_button)
         layout.addLayout(bottom_row)
+
+        # ── transcript review bar (hidden until review_transcript is on) ───────
+        self._review_bar = QWidget()
+        review_layout = QHBoxLayout(self._review_bar)
+        review_layout.setContentsMargins(0, 2, 0, 2)
+        review_layout.setSpacing(6)
+        self._review_edit = QLineEdit()
+        self._review_edit.setPlaceholderText("Transcript — edit if needed, then press Enter")
+        self._review_edit.returnPressed.connect(self._on_confirm_transcript)
+        self._review_countdown = QLabel("")
+        self._review_countdown.setStyleSheet("color: #888; font-size: 12px; min-width: 28px;")
+        confirm_btn = QPushButton("✓ Send")
+        confirm_btn.setFixedWidth(70)
+        confirm_btn.clicked.connect(self._on_confirm_transcript)
+        cancel_btn = QPushButton("✕")
+        cancel_btn.setFixedWidth(30)
+        cancel_btn.clicked.connect(self._on_cancel_transcript)
+        review_layout.addWidget(QLabel("Heard:"))
+        review_layout.addWidget(self._review_edit, stretch=1)
+        review_layout.addWidget(self._review_countdown)
+        review_layout.addWidget(confirm_btn)
+        review_layout.addWidget(cancel_btn)
+        self._review_bar.setVisible(False)
+        layout.addWidget(self._review_bar)
+
+        self._review_timer = QTimer(self)
+        self._review_timer.setInterval(1000)
+        self._review_timer.timeout.connect(self._review_tick)
+        self._review_seconds_left = 0
 
         self.setCentralWidget(body)
         self.start_button.clicked.connect(self.start)
@@ -386,6 +452,14 @@ class MainWindow(QMainWindow):
     def _build_menu(self):
         bar = self.menuBar()
         file_menu = bar.addMenu("File")
+
+        settings_action = QAction("Settings…", self)
+        settings_action.setShortcut(QKeySequence("Ctrl+,"))
+        settings_action.triggered.connect(self._open_settings)
+        file_menu.addAction(settings_action)
+
+        file_menu.addSeparator()
+
         export_action = QAction("Export session…", self)
         export_action.setShortcut(QKeySequence("Ctrl+E"))
         export_action.triggered.connect(self._export_session)
@@ -504,15 +578,17 @@ class MainWindow(QMainWindow):
     def _format_message(self, role, content):
         label = "You" if role == "user" else "Dogen"
         escaped = html.escape(content)
-        if role == "assistant":
+        if role == "user":
+            escaped = highlight_fillers_html(escaped)
+        elif role == "assistant":
             def _colorize(m):
                 tag = m.group(1)
                 if tag.startswith("[Correction:"):
-                    color = "#e67e22"   # orange
+                    color = "#e67e22"
                 elif tag.startswith("[Better phrasing:"):
-                    color = "#27ae60"   # green
+                    color = "#27ae60"
                 else:
-                    color = "#3b82f6"   # blue for Explanation / any other tag
+                    color = "#3b82f6"
                 return f'<span style="color:{color}">{tag}</span>'
             escaped = _CORRECTION_RE.sub(_colorize, escaped)
         return f"<b>{label}:</b> {escaped}"
@@ -551,6 +627,7 @@ class MainWindow(QMainWindow):
         self.worker.recording_started.connect(self._on_recording_started)
         self.worker.waiting_for_ptt.connect(self._on_waiting_for_ptt)
         self.worker.transcribed.connect(self._on_transcribed)
+        self.worker.transcript_review.connect(self._on_transcript_review)
         self.worker.response_chunk.connect(self._on_chunk)
         self.worker.audio_playing.connect(lambda: self.status.setText("Playing audio..."))
         self.worker.error.connect(self._on_error)
@@ -594,7 +671,39 @@ class MainWindow(QMainWindow):
         if self._last_error is None:
             self.status.setText("Ready for next turn")
 
+    def _on_transcript_review(self, text: str):
+        """Show the editable review bar with a 5-second auto-confirm countdown."""
+        self._review_edit.setText(text)
+        self._review_seconds_left = 5
+        self._review_countdown.setText(f"{self._review_seconds_left}s")
+        self._review_bar.setVisible(True)
+        self._review_edit.setFocus()
+        self._review_edit.selectAll()
+        self._review_timer.start()
+        self.status.setText("Check transcript — sending in 5 s…")
+
+    def _review_tick(self):
+        self._review_seconds_left -= 1
+        if self._review_seconds_left <= 0:
+            self._on_confirm_transcript()
+        else:
+            self._review_countdown.setText(f"{self._review_seconds_left}s")
+
+    def _on_confirm_transcript(self):
+        self._review_timer.stop()
+        self._review_bar.setVisible(False)
+        if self.worker and self.worker.isRunning():
+            self.worker.confirm_transcript(self._review_edit.text().strip())
+
+    def _on_cancel_transcript(self):
+        self._review_timer.stop()
+        self._review_bar.setVisible(False)
+        if self.worker and self.worker.isRunning():
+            self.worker.cancel_transcript()
+
     def _on_transcribed(self, text):
+        fillers = count_fillers(text)
+        self._session_fillers += fillers
         self.history.append(f"You: {text}")
         self._append("\nDogen: ")
         self._assistant_open = True
@@ -648,6 +757,35 @@ class MainWindow(QMainWindow):
         cursor.insertText(text)
         self.history.setTextCursor(cursor)
         self.history.ensureCursorVisible()
+
+    # ── settings ───────────────────────────────────────────────────────────────
+
+    def _open_settings(self):
+        from pathlib import Path
+        path = self.settings_path or Path("settings.json")
+        dlg = SettingsDialog(self.config, path, parent=self)
+        if dlg.exec_():
+            # Invalidate pipeline so next start picks up new whisper model etc.
+            self._pipeline = None
+
+    # ── session management ─────────────────────────────────────────────────────
+
+    def _end_session(self):
+        if self.worker and self.worker.isRunning():
+            self.stop()
+            return
+        stats = self.db.session_full_stats(self.session_id)
+        stats["fillers"] = self._session_fillers
+        dlg = SessionSummaryDialog(stats, parent=self)
+        result = dlg.exec_()
+        if result == SessionSummaryDialog.NEW_SESSION:
+            self.session_id = uuid.uuid4().hex
+            self._session_fillers = 0
+            self.context.reset()
+            self._pipeline = None
+            self._render_history()
+            self._update_stats()
+            self.status.setText("New session started")
 
     # ── vocab ──────────────────────────────────────────────────────────────────
 

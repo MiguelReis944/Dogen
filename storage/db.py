@@ -140,6 +140,38 @@ class Database:
                 [(session_id, orig.strip(), corr.strip()) for orig, corr in pairs],
             )
 
+    def session_full_stats(self, session_id: str) -> dict:
+        row = self.connection.execute(
+            "SELECT COUNT(*), MIN(created_at), MAX(created_at) FROM conversations "
+            "WHERE session_id=? AND role='user'",
+            (session_id,),
+        ).fetchone()
+        corrections = self.connection.execute(
+            "SELECT COUNT(*) FROM vocab WHERE session_id=?", (session_id,)
+        ).fetchone()[0]
+        vocab = self.get_vocab_for_session(session_id, limit=20)
+
+        turns   = row[0] or 0
+        minutes = 0.0
+        if turns > 1 and row[1] and row[2]:
+            from datetime import datetime
+            fmt = "%Y-%m-%d %H:%M:%S"
+            try:
+                t1 = datetime.strptime(row[1][:19], fmt)
+                t2 = datetime.strptime(row[2][:19], fmt)
+                minutes = (t2 - t1).total_seconds() / 60
+            except Exception:
+                pass
+
+        return {"turns": turns, "corrections": corrections, "minutes": minutes, "vocab": vocab}
+
+    def get_vocab_for_session(self, session_id: str, limit: int = 20) -> list[VocabItem]:
+        rows = self.connection.execute(
+            "SELECT original,corrected,created_at FROM vocab WHERE session_id=? ORDER BY id DESC LIMIT ?",
+            (session_id, limit),
+        ).fetchall()
+        return [VocabItem(*row) for row in rows]
+
     def get_vocab(self, limit: int = 200) -> list[VocabItem]:
         rows = self.connection.execute(
             "SELECT original,corrected,created_at FROM vocab ORDER BY id DESC LIMIT ?",

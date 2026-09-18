@@ -13,6 +13,7 @@ _SENTENCE_END_RE = re.compile(r'(?<=[.!?])\s+')
 # Strip any annotation block the LLM might produce: [Anything: ...].
 # Matches [Word(s): content] — keeps the text visible in the UI but silent in TTS.
 _COACHING_BLOCK_RE = re.compile(r'\[[A-Z][^:\[\]\n]*:.*?\]\s*', re.DOTALL)
+_ELLIPSIS_RE = re.compile(r'\.{2,}')
 
 # Null correction markers the model sometimes emits when it has nothing real to say.
 _NULL_ANNOTATION_RE = re.compile(
@@ -27,7 +28,9 @@ def _strip_null_annotations(text: str) -> str:
 
 
 def _for_tts(text: str) -> str:
-    return _COACHING_BLOCK_RE.sub('', text).strip()
+    text = _COACHING_BLOCK_RE.sub('', text)
+    text = _ELLIPSIS_RE.sub('', text)   # ellipsis causes gruut phonemizer artifacts
+    return re.sub(r'\s+', ' ', text).strip()
 
 _DONE = object()
 
@@ -43,7 +46,8 @@ class ProcessingPipeline:
         self.synthesizer = synthesizer
         self.player = player
 
-    def run(self, audio, context: ConversationContext, emit: Callable[[str, str], None], cancelled: Callable[[], bool]):
+    def run(self, audio, context: ConversationContext, emit: Callable[[str, str], None],
+            cancelled: Callable[[], bool], confirm_fn: Callable[[str], str] | None = None):
         if cancelled():
             raise TurnCancelled()
         emit("processing", "Transcribing...")
@@ -53,6 +57,15 @@ class ProcessingPipeline:
         if not transcript:
             emit("empty", "Didn't catch that. Please try again.")
             return None
+
+        if confirm_fn is not None:
+            confirmed = confirm_fn(transcript)
+            if cancelled():
+                raise TurnCancelled()
+            if not confirmed:
+                return None
+            transcript = confirmed
+
         emit("transcribed", transcript)
 
         pending = context.get_messages_for_ollama() + [{"role": "user", "content": transcript}]

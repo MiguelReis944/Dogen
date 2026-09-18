@@ -40,7 +40,8 @@ def main():
             context = ConversationContext(config.context_size, config.system_prompt)
             for message in db.recent_messages(session_id, 2 * config.context_size):
                 context.add_message(message.role, message.content)
-            window = MainWindow(config, db, context, session_id)
+            window = MainWindow(config, db, context, session_id,
+                                settings_path=root / "settings.json")
             window.show()
             return app.exec_()
     except Exception as exc:

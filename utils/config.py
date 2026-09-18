@@ -21,6 +21,7 @@ class AppConfig:
     silence_duration_sec: float = 2.0
     context_size: int = 10
     input_mode: str = "vad"  # "vad" | "ptt"
+    review_transcript: bool = False  # show editable transcript before sending to LLM
     system_prompt: str = SYSTEM_PROMPT
 
     def __post_init__(self):
