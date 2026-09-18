@@ -30,6 +30,14 @@ def test_database_persists_and_reloads_session(tmp_path):
         assert connection.execute("select count(*) from conversations").fetchone()[0] == 2
 
 
+def test_turn_insert_is_atomic(tmp_path):
+    path = tmp_path / "conversations.db"
+    with Database(path) as db:
+        with pytest.raises(sqlite3.IntegrityError):
+            db.add_turn("session", "Hello", None, "mistral", 10)
+        assert db.recent_messages("session", 10) == []
+
+
 def test_corrupt_database_is_backed_up_and_recreated(tmp_path):
     path = tmp_path / "conversations.db"
     path.write_bytes(b"not a SQLite database")

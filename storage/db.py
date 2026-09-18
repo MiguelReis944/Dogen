@@ -55,6 +55,17 @@ class Database:
                 (session_id, role, content, model_used, latency_ms),
             )
 
+    def add_turn(self, session_id: str, user_text: str, assistant_text: str,
+                 model_used: str, latency_ms: int):
+        with self.connection:
+            self.connection.executemany(
+                "INSERT INTO conversations(session_id,role,content,model_used,latency_ms) VALUES(?,?,?,?,?)",
+                [
+                    (session_id, "user", user_text, model_used, latency_ms),
+                    (session_id, "assistant", assistant_text, model_used, latency_ms),
+                ],
+            )
+
     def recent_messages(self, session_id: str, count: int) -> list[Message]:
         rows = self.connection.execute(
             "SELECT role,content,created_at,model_used,latency_ms FROM "

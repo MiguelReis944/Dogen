@@ -45,10 +45,16 @@ class ConversationWorker(QThread):
     def run(self):
         try:
             self.error.emit("Loading local speech models...")
+            transcriber = Transcriber(self.config.whisper_model)
+            if self._cancelled():
+                return
+            synthesizer = Synthesizer(self.config.tts_model)
+            if self._cancelled():
+                return
             pipeline = ProcessingPipeline(
-                Transcriber(self.config.whisper_model),
+                transcriber,
                 OllamaClient(self.config.ollama_host, self.config.ollama_model),
-                Synthesizer(self.config.tts_model),
+                synthesizer,
                 Player(self.config.speaker_device),
             )
             recorder = Recorder(self.config.mic_device, self.config.vad_threshold,
@@ -117,8 +123,13 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(body)
         self.start_button.clicked.connect(self.start)
         self.stop_button.clicked.connect(self.stop)
-        for message in db.recent_messages(session_id, 2 * context.max_history):
+        self._render_history()
+
+    def _render_history(self):
+        self.history.clear()
+        for message in self.db.recent_messages(self.session_id, 2 * self.context.max_history):
             self.history.append(f"{'You' if message.role == 'user' else 'Dogen'}: {message.content}")
+        self._assistant_open = False
 
     def start(self):
         if self.worker and self.worker.isRunning():
@@ -160,14 +171,25 @@ class MainWindow(QMainWindow):
         self._append(text)
 
     def _on_error(self, text):
+        if self._assistant_open:
+            self._render_history()
         self.status.setText(text)
 
     def _on_completed(self, user_text, assistant_text, latency_ms):
-        self.db.add_message(self.session_id, "user", user_text, self.config.ollama_model, latency_ms)
-        self.db.add_message(self.session_id, "assistant", assistant_text, self.config.ollama_model, latency_ms)
-        self._assistant_open = False
+        try:
+            self.db.add_turn(self.session_id, user_text, assistant_text,
+                             self.config.ollama_model, latency_ms)
+            self._render_history()
+        except Exception as exc:
+            logging.exception("Could not save conversation turn")
+            if len(self.context.messages) >= 2:
+                del self.context.messages[-2:]
+            self._render_history()
+            self.status.setText(f"Could not save turn: {exc}")
 
     def _on_finished(self):
+        if self._assistant_open:
+            self._render_history()
         self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         self.status.setText("Ready")

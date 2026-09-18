@@ -18,3 +18,14 @@ def test_window_keeps_dogen_name_and_start_control(tmp_path):
         assert window.start_button.text() == "Start Recording"
         assert not window.stop_button.isEnabled()
         window.close()
+
+
+def test_failed_turn_removes_provisional_transcript(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = MainWindow(AppConfig(), db, ConversationContext(), "session")
+        window._on_transcribed("temporary words")
+        assert "temporary words" in window.history.toPlainText()
+        window._on_error("TTS failed")
+        assert "temporary words" not in window.history.toPlainText()
+        window.close()
