@@ -29,3 +29,13 @@ def test_failed_turn_removes_provisional_transcript(tmp_path):
         window._on_error("TTS failed")
         assert "temporary words" not in window.history.toPlainText()
         window.close()
+
+
+def test_worker_failure_remains_visible_after_finish(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = MainWindow(AppConfig(), db, ConversationContext(), "session")
+        window._on_error("Coqui model is not cached")
+        window._on_finished()
+        assert window.status.text() == "Coqui model is not cached"
+        window.close()

@@ -16,6 +16,7 @@ from pipeline import ProcessingPipeline, TurnCancelled
 
 
 class ConversationWorker(QThread):
+    status_message = pyqtSignal(str)
     recording_started = pyqtSignal()
     transcribed = pyqtSignal(str)
     response_chunk = pyqtSignal(str)
@@ -44,7 +45,7 @@ class ConversationWorker(QThread):
 
     def run(self):
         try:
-            self.error.emit("Loading local speech models...")
+            self.status_message.emit("Loading local speech models...")
             transcriber = Transcriber(self.config.whisper_model)
             if self._cancelled():
                 return
@@ -63,7 +64,7 @@ class ConversationWorker(QThread):
                 try:
                     pipeline.llm.client.list()
                 except Exception:
-                    self.error.emit("Waiting for Ollama on localhost:11434...")
+                    self.status_message.emit("Waiting for Ollama on localhost:11434...")
                     for _ in range(50):
                         if self._cancelled():
                             return
@@ -105,6 +106,7 @@ class MainWindow(QMainWindow):
         self.worker = None
         self._assistant_open = False
         self._closing = False
+        self._last_error = None
 
         body = QWidget()
         layout = QVBoxLayout(body)
@@ -135,18 +137,28 @@ class MainWindow(QMainWindow):
         if self.worker and self.worker.isRunning():
             return
         self.worker = ConversationWorker(self.config, self.context, self)
-        self.worker.recording_started.connect(lambda: self.status.setText("Recording..."))
+        self.worker.status_message.connect(self.status.setText)
+        self.worker.recording_started.connect(self._on_recording_started)
         self.worker.transcribed.connect(self._on_transcribed)
         self.worker.response_chunk.connect(self._on_chunk)
         self.worker.audio_playing.connect(lambda: self.status.setText("Playing audio..."))
         self.worker.error.connect(self._on_error)
-        self.worker.ready.connect(lambda: self.status.setText("Ready for next turn"))
+        self.worker.ready.connect(self._on_ready)
         self.worker.turn_completed.connect(self._on_completed)
         self.worker.finished.connect(self._on_finished)
         self.start_button.setEnabled(False)
         self.stop_button.setEnabled(True)
+        self._last_error = None
         self.status.setText("Starting...")
         self.worker.start()
+
+    def _on_recording_started(self):
+        self._last_error = None
+        self.status.setText("Recording...")
+
+    def _on_ready(self):
+        if self._last_error is None:
+            self.status.setText("Ready for next turn")
 
     def stop(self):
         if self.worker and self.worker.isRunning():
@@ -173,6 +185,7 @@ class MainWindow(QMainWindow):
     def _on_error(self, text):
         if self._assistant_open:
             self._render_history()
+        self._last_error = text
         self.status.setText(text)
 
     def _on_completed(self, user_text, assistant_text, latency_ms):
@@ -180,11 +193,13 @@ class MainWindow(QMainWindow):
             self.db.add_turn(self.session_id, user_text, assistant_text,
                              self.config.ollama_model, latency_ms)
             self._render_history()
+            self._last_error = None
         except Exception as exc:
             logging.exception("Could not save conversation turn")
             if len(self.context.messages) >= 2:
                 del self.context.messages[-2:]
             self._render_history()
+            self._last_error = f"Could not save turn: {exc}"
             self.status.setText(f"Could not save turn: {exc}")
 
     def _on_finished(self):
@@ -192,7 +207,8 @@ class MainWindow(QMainWindow):
             self._render_history()
         self.start_button.setEnabled(True)
         self.stop_button.setEnabled(False)
-        self.status.setText("Ready")
+        if self._last_error is None:
+            self.status.setText("Ready")
         if self._closing:
             self.close()
 
