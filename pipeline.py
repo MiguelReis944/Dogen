@@ -14,6 +14,17 @@ _SENTENCE_END_RE = re.compile(r'(?<=[.!?])\s+')
 # Matches [Word(s): content] — keeps the text visible in the UI but silent in TTS.
 _COACHING_BLOCK_RE = re.compile(r'\[[A-Z][^:\[\]\n]*:.*?\]\s*', re.DOTALL)
 
+# Null correction markers the model sometimes emits when it has nothing real to say.
+_NULL_ANNOTATION_RE = re.compile(
+    r'\[(Correction|Better phrasing|Explanation|Note)\s*:\s*(None|N/A|no errors?|no correction needed)[^\]]*\]\s*',
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _strip_null_annotations(text: str) -> str:
+    """Remove annotations where the model wrote a marker but had nothing to correct."""
+    return _NULL_ANNOTATION_RE.sub('', text).strip()
+
 
 def _for_tts(text: str) -> str:
     return _COACHING_BLOCK_RE.sub('', text).strip()
@@ -100,7 +111,7 @@ class ProcessingPipeline:
         if llm_errors:
             raise llm_errors[0]
 
-        reply = "".join(reply_chunks).strip()
+        reply = _strip_null_annotations("".join(reply_chunks).strip())
         if not reply:
             raise RuntimeError("Ollama returned an empty response")
         if cancelled():
