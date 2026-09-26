@@ -6,6 +6,7 @@ set "VENV=%ROOT%.venv"
 set "PYTHON=%VENV%\Scripts\python.exe"
 set "PREFLIGHT=%ROOT%scripts\preflight.py"
 set "SETUP_MARKER=%VENV%\.dogen_setup_ok"
+if not defined TTS_HOME set "TTS_HOME=%LOCALAPPDATA%"
 set "WHISPER_MODEL=small.en"
 set "TTS_MODEL=tts_models/en/ljspeech/tacotron2-DDC"
 :: Para voz masculina (requer eSpeak-NG instalado): tts_models/en/sam/tacotron-DDC
@@ -18,7 +19,12 @@ if /i "%~1"=="reinstall" (
     echo Forcando reinstalacao completa de dependencias...
 )
 
-if exist "%SETUP_MARKER%" goto :after_setup
+if exist "%SETUP_MARKER%" (
+    "%PYTHON%" "%PREFLIGHT%" check-runtime >nul 2>&1
+    if not errorlevel 1 goto :after_setup
+    echo Ambiente Python incompleto; reinstalando dependencias...
+    del /f /q "%SETUP_MARKER%" >nul 2>&1
+)
 
 :: ── 0. Pre-requisitos de sistema ────────────────────────────────────────────
 echo [0/5] Verificando pre-requisitos de sistema...
