@@ -1,11 +1,108 @@
 import sqlite3
+import sys
+from types import SimpleNamespace
+
+import numpy as np
 import pytest
 
+from audio.recorder import Recorder, RecordingResult
 from nlp.llm import ConversationContext, OllamaClient
 from nlp.transcriber import _looks_like_silence
 from storage.db import Database
 from utils.config import AppConfig, load_config, save_config
 from audio.vad import VoiceDetector
+
+
+def _fake_sounddevice(monkeypatch, chunks):
+    class FakeInputStream:
+        def __init__(self, callback, **kwargs):
+            self.callback = callback
+
+        def __enter__(self):
+            for samples in chunks:
+                block = np.asarray(samples, dtype=np.float32).reshape(-1, 1)
+                self.callback(block, len(block), None, None)
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+    monkeypatch.setitem(sys.modules, "sounddevice", SimpleNamespace(InputStream=FakeInputStream))
+
+
+def test_recorder_reports_ptt_release(monkeypatch):
+    _fake_sounddevice(monkeypatch, [np.ones(3200, dtype=np.float32)])
+    monkeypatch.setattr("audio.recorder._denoise", lambda samples, rate: samples)
+
+    result = Recorder().record(lambda: False, stop_fn=lambda: True)
+
+    assert result.stop_reason == "ptt_release"
+    assert result.samples.dtype == np.float32
+    assert result.samples.ndim == 1
+    assert result.duration_sec >= 0
+
+
+def test_recorder_reports_silence(monkeypatch):
+    _fake_sounddevice(
+        monkeypatch,
+        [np.full(1600, 0.1, dtype=np.float32), np.zeros(1600, dtype=np.float32)],
+    )
+    monkeypatch.setattr("audio.recorder._denoise", lambda samples, rate: samples)
+
+    result = Recorder(threshold=0.02, silence_duration_sec=0.1).record(lambda: False)
+
+    assert result.stop_reason == "silence"
+    assert result.samples.size == 3200
+
+
+def test_recorder_reports_timeout(monkeypatch):
+    _fake_sounddevice(monkeypatch, [])
+    times = iter([0.0, 61.0, 61.0])
+    monkeypatch.setattr("audio.recorder.monotonic", lambda: next(times))
+
+    result = Recorder().record(lambda: False)
+
+    assert isinstance(result, RecordingResult)
+    assert result.stop_reason == "timeout"
+    assert result.samples.size == 0
+    assert result.duration_sec == 61.0
+
+
+def test_recorder_reports_cancellation(monkeypatch):
+    _fake_sounddevice(monkeypatch, [])
+
+    result = Recorder().record(lambda: True)
+
+    assert result.stop_reason == "cancelled"
+    assert result.samples.size == 0
+
+
+def test_recorder_reuses_learned_noise_floor(monkeypatch):
+    initial_floors = []
+
+    class SpyVoiceDetector(VoiceDetector):
+        def __init__(self, threshold, silence_duration_sec, sample_rate, initial_noise_floor=0.0):
+            initial_floors.append(initial_noise_floor)
+            super().__init__(threshold, silence_duration_sec, sample_rate, initial_noise_floor)
+
+    monkeypatch.setattr("audio.recorder.VoiceDetector", SpyVoiceDetector)
+    _fake_sounddevice(
+        monkeypatch,
+        [
+            np.full(1600, 0.01, dtype=np.float32),
+            np.full(1600, 0.1, dtype=np.float32),
+            np.zeros(1600, dtype=np.float32),
+        ],
+    )
+    monkeypatch.setattr("audio.recorder._denoise", lambda samples, rate: samples)
+    recorder = Recorder(threshold=0.02, silence_duration_sec=0.1)
+
+    recorder.record(lambda: False)
+    learned_floor = recorder._noise_floor
+    recorder.record(lambda: True)
+
+    assert learned_floor > 0
+    assert initial_floors == [0.0, learned_floor]
 
 
 def test_context_keeps_complete_recent_turns():

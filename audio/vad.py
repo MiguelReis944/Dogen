@@ -16,6 +16,10 @@ class VoiceDetector:
         self.silent_samples = 0
         self._noise_floor = initial_noise_floor
 
+    @property
+    def noise_floor(self) -> float:
+        return self._noise_floor
+
     def feed(self, samples) -> bool:
         block = np.asarray(samples, dtype=np.float32)
         rms = float(np.sqrt(np.mean(block ** 2))) if block.size else 0.0

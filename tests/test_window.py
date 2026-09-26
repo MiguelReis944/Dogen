@@ -94,3 +94,14 @@ def test_on_models_ready_empty_falls_back_to_config(tmp_path):
         assert window.model_combo.currentText() == "mistral"
         assert window.model_combo.isEnabled()
         window.close()
+
+
+def test_recording_finished_shows_capture_diagnostics(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+
+        window._on_recording_finished("silence", 6.24)
+
+        assert window.status.text() == "Captured 6.2s · silence"
+        window.close()

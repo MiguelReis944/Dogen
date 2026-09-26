@@ -1,11 +1,20 @@
 """Microphone capture with end-of-speech detection."""
 
+from dataclasses import dataclass
 from queue import Empty, Queue
 from time import monotonic
+from typing import Literal
 
 import numpy as np
 
 from audio.vad import VoiceDetector
+
+
+@dataclass(frozen=True)
+class RecordingResult:
+    samples: np.ndarray
+    stop_reason: Literal["silence", "ptt_release", "timeout", "cancelled"]
+    duration_sec: float
 
 
 class Recorder:
@@ -41,9 +50,16 @@ class Recorder:
                 rms = float(np.sqrt(np.mean(chunk ** 2)))
                 on_volume(rms)
 
+        stop_reason = "timeout"
         with sd.InputStream(samplerate=self.sample_rate, channels=1, dtype="float32",
                             blocksize=1600, device=self.device, callback=callback):
-            while not cancelled() and monotonic() - start < 60:
+            while True:
+                if cancelled():
+                    stop_reason = "cancelled"
+                    break
+                if monotonic() - start >= 60:
+                    stop_reason = "timeout"
+                    break
                 try:
                     chunk = blocks.get(timeout=0.1)
                 except Empty:
@@ -53,17 +69,29 @@ class Recorder:
                 chunks.append(chunk)
                 if stop_fn is not None:
                     if stop_fn():
+                        stop_reason = "ptt_release"
                         break
                 else:
                     if detector.feed(chunk) or (not detector.heard_voice and monotonic() - start >= 5):
+                        stop_reason = "silence"
                         break
 
-        samples = np.concatenate(chunks) if chunks else np.empty(0, dtype=np.float32)
+        if stop_fn is None:
+            self._noise_floor = detector.noise_floor
+
+        duration_sec = max(0.0, monotonic() - start)
+        samples = (
+            np.concatenate(chunks).astype(np.float32, copy=False)
+            if chunks
+            else np.empty(0, dtype=np.float32)
+        )
         min_samples = int(0.2 * self.sample_rate)
         has_audio = (stop_fn is not None) or (detector.heard_voice)
         if not has_audio or samples.size < min_samples:
-            return np.empty(0, dtype=np.float32)
-        return _denoise(samples, self.sample_rate)
+            samples = np.empty(0, dtype=np.float32)
+        else:
+            samples = _denoise(samples, self.sample_rate).astype(np.float32, copy=False)
+        return RecordingResult(samples, stop_reason, duration_sec)
 
 
 def _denoise(samples: np.ndarray, sample_rate: int) -> np.ndarray:

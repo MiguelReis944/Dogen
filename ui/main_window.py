@@ -65,6 +65,7 @@ class ModelFetcher(QThread):
 class ConversationWorker(QThread):
     status_message    = pyqtSignal(str)
     recording_started = pyqtSignal()
+    recording_finished = pyqtSignal(str, float)
     waiting_for_ptt   = pyqtSignal()
     transcribed       = pyqtSignal(str)
     transcript_review = pyqtSignal(str)   # needs user confirmation before LLM
@@ -252,14 +253,16 @@ class ConversationWorker(QThread):
                         return
 
                 self.recording_started.emit()
-                samples = recorder.record(
+                recording = recorder.record(
                     self._cancelled,
                     on_volume=lambda rms: self.volume_level.emit(rms),
                     stop_fn=self._ptt_stop_event.is_set if is_ptt else None,
                 )
+                self.recording_finished.emit(recording.stop_reason, recording.duration_sec)
 
-                if self._cancelled():
+                if recording.stop_reason == "cancelled" or self._cancelled():
                     return
+                samples = recording.samples
                 if not samples.size:
                     self.error.emit("Didn't catch that. Please try again.")
                     self.ready.emit()
@@ -632,6 +635,7 @@ class MainWindow(QMainWindow):
         )
         self.worker.status_message.connect(self.status.setText)
         self.worker.recording_started.connect(self._on_recording_started)
+        self.worker.recording_finished.connect(self._on_recording_finished)
         self.worker.waiting_for_ptt.connect(self._on_waiting_for_ptt)
         self.worker.transcribed.connect(self._on_transcribed)
         self.worker.transcript_review.connect(self._on_transcript_review)
@@ -667,6 +671,9 @@ class MainWindow(QMainWindow):
         self.pet.set_state("listening")
         label = "Hold Space — recording..." if self.config.input_mode == "ptt" else "Recording..."
         self.status.setText(label)
+
+    def _on_recording_finished(self, stop_reason: str, duration_sec: float):
+        self.status.setText(f"Captured {duration_sec:.1f}s · {stop_reason}")
 
     def _on_waiting_for_ptt(self):
         self.vol_bar.setVisible(False)
