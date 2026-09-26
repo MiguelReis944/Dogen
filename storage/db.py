@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from nlp.feedback import CoachFeedback, correction_pair
-from storage.models import Message, VocabItem
+from storage.models import Message, TurnMetrics, VocabItem
 
 _CORRECTION_RE = re.compile(r'\[Correction:\s*(.+?)\s*→\s*(.+?)\]')
 
@@ -69,6 +69,16 @@ class Database:
             category TEXT
         );
         CREATE INDEX IF NOT EXISTS feedback_session ON feedback(session_id, id);
+        CREATE TABLE IF NOT EXISTS turn_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            word_count INTEGER NOT NULL,
+            filler_count INTEGER NOT NULL,
+            transcript_edited INTEGER NOT NULL,
+            correction_category TEXT
+        );
+        CREATE INDEX IF NOT EXISTS turn_metrics_session ON turn_metrics(session_id, id);
         """)
 
     # ── conversations ──────────────────────────────────────────────────────────
@@ -92,6 +102,31 @@ class Database:
             )
         # Extract and persist any corrections from the assistant reply
         self._save_corrections(session_id, assistant_text)
+
+    def add_completed_turn(self, session_id: str, user_text: str, assistant_text: str,
+                           model_used: str, latency_ms: int, feedback: CoachFeedback,
+                           metrics: TurnMetrics) -> None:
+        with self.connection:
+            self.connection.executemany(
+                "INSERT INTO conversations(session_id,role,content,model_used,latency_ms) "
+                "VALUES(?,?,?,?,?)",
+                [
+                    (session_id, "user", user_text, model_used, latency_ms),
+                    (session_id, "assistant", assistant_text, model_used, latency_ms),
+                ],
+            )
+            self._insert_feedback(session_id, feedback)
+            self.connection.execute(
+                "INSERT INTO turn_metrics(session_id,word_count,filler_count,"
+                "transcript_edited,correction_category) VALUES(?,?,?,?,?)",
+                (
+                    session_id,
+                    metrics.word_count,
+                    metrics.filler_count,
+                    int(metrics.transcript_edited),
+                    metrics.correction_category,
+                ),
+            )
 
     def recent_messages(self, session_id: str, count: int) -> list[Message]:
         rows = self.connection.execute(
@@ -154,22 +189,27 @@ class Database:
         if feedback.is_empty:
             return
         with self.connection:
+            self._insert_feedback(session_id, feedback)
+
+    def _insert_feedback(self, session_id: str, feedback: CoachFeedback) -> None:
+        if feedback.is_empty:
+            return
+        self.connection.execute(
+            "INSERT INTO feedback(session_id,correction,better_phrasing,category) "
+            "VALUES(?,?,?,?)",
+            (
+                session_id,
+                feedback.correction,
+                feedback.better_phrasing,
+                feedback.category,
+            ),
+        )
+        pair = correction_pair(feedback)
+        if pair:
             self.connection.execute(
-                "INSERT INTO feedback(session_id,correction,better_phrasing,category) "
-                "VALUES(?,?,?,?)",
-                (
-                    session_id,
-                    feedback.correction,
-                    feedback.better_phrasing,
-                    feedback.category,
-                ),
+                "INSERT INTO vocab(session_id,original,corrected) VALUES(?,?,?)",
+                (session_id, pair[0], pair[1]),
             )
-            pair = correction_pair(feedback)
-            if pair:
-                self.connection.execute(
-                    "INSERT INTO vocab(session_id,original,corrected) VALUES(?,?,?)",
-                    (session_id, pair[0], pair[1]),
-                )
 
     def feedback_for_session(self, session_id: str) -> list[CoachFeedback]:
         rows = self.connection.execute(
@@ -188,6 +228,10 @@ class Database:
         corrections = self.connection.execute(
             "SELECT COUNT(*) FROM vocab WHERE session_id=?", (session_id,)
         ).fetchone()[0]
+        fillers = self.connection.execute(
+            "SELECT COALESCE(SUM(filler_count), 0) FROM turn_metrics WHERE session_id=?",
+            (session_id,),
+        ).fetchone()[0]
         vocab = self.get_vocab_for_session(session_id, limit=20)
 
         turns   = row[0] or 0
@@ -202,7 +246,13 @@ class Database:
             except Exception:
                 pass
 
-        return {"turns": turns, "corrections": corrections, "minutes": minutes, "vocab": vocab}
+        return {
+            "turns": turns,
+            "corrections": corrections,
+            "minutes": minutes,
+            "vocab": vocab,
+            "fillers": fillers,
+        }
 
     def get_vocab_for_session(self, session_id: str, limit: int = 20) -> list[VocabItem]:
         rows = self.connection.execute(

@@ -15,3 +15,11 @@ class VocabItem:
     original: str
     corrected: str
     created_at: str
+
+
+@dataclass(frozen=True)
+class TurnMetrics:
+    word_count: int
+    filler_count: int
+    transcript_edited: bool
+    correction_category: str | None

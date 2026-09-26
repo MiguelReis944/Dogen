@@ -4,6 +4,7 @@ import pytest
 from nlp.llm import ConversationContext
 from nlp.feedback import CoachFeedback
 from pipeline import ProcessingPipeline, TurnCancelled, TurnResult, _for_tts, _strip_null_annotations
+from storage.models import TurnMetrics
 
 
 class FakeTranscriber:
@@ -33,7 +34,12 @@ def test_pipeline_turn_updates_context_and_reports_events():
     context = ConversationContext()
     pipeline = ProcessingPipeline(FakeTranscriber(), FakeLLM(), FakeSynthesizer(), FakePlayer())
     result = pipeline.run([0.1], context, lambda kind, value: events.append((kind, value)), lambda: False)
-    assert result == TurnResult("I goed to school", "I went to school.", CoachFeedback())
+    assert result == TurnResult(
+        "I goed to school",
+        "I went to school.",
+        CoachFeedback(),
+        TurnMetrics(4, 0, False, None),
+    )
     assert [item["role"] for item in context.messages] == ["user", "assistant"]
     kinds = [kind for kind, _ in events]
     assert kinds == ["processing", "transcribed", "response_chunk", "audio_playing"]
@@ -106,7 +112,12 @@ def test_pipeline_confirm_fn_replaces_transcript_before_llm():
         [0.1], context, lambda kind, value: events.append((kind, value)), lambda: False,
         confirm_fn=lambda text: "I went to school",
     )
-    assert result == TurnResult("I went to school", "Great!", CoachFeedback())
+    assert result == TurnResult(
+        "I went to school",
+        "Great!",
+        CoachFeedback(),
+        TurnMetrics(4, 0, True, None),
+    )
     assert ("transcribed", "I went to school") in events
     assert [m["content"] for m in context.messages] == ["I went to school", "Great!"]
 
@@ -215,5 +226,33 @@ def test_pipeline_returns_message_and_structured_feedback_separately():
             better_phrasing="I stopped by yesterday.",
             category="verb_tense",
         ),
+        metrics=TurnMetrics(4, 0, False, "verb_tense"),
     )
     assert context.messages[-1]["content"] == "What did you buy?"
+
+
+def test_pipeline_builds_metrics_from_confirmed_transcript():
+    class AcceptEditedTranscriptLLM:
+        def generate(self, messages, on_chunk, cancelled):
+            on_chunk("Great!")
+            return "Great!"
+
+    context = ConversationContext()
+    pipeline = ProcessingPipeline(
+        FakeTranscriber(), AcceptEditedTranscriptLLM(), FakeSynthesizer(), FakePlayer()
+    )
+
+    result = pipeline.run(
+        [0.1],
+        context,
+        lambda kind, value: None,
+        lambda: False,
+        confirm_fn=lambda text: "Actually I went to school",
+    )
+
+    assert result.metrics == TurnMetrics(
+        word_count=5,
+        filler_count=1,
+        transcript_edited=True,
+        correction_category=None,
+    )

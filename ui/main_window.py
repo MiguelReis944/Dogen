@@ -17,7 +17,7 @@ from PyQt5.QtWidgets import (QAction, QComboBox, QFileDialog, QHBoxLayout,
 
 from audio.player import Player
 from audio.recorder import Recorder
-from nlp.filler_words import count_fillers, highlight_fillers_html
+from nlp.filler_words import highlight_fillers_html
 from nlp.feedback import CoachFeedback
 from nlp.llm import (SCENARIOS, ConversationContext, OllamaClient,
                      build_system_prompt)
@@ -364,7 +364,6 @@ class MainWindow(QMainWindow):
         self._closing = False
         self._last_error = None
         self._corrections_on = True
-        self._session_fillers = 0  # running filler word count for current session
 
         self._build_menu()
 
@@ -796,8 +795,6 @@ class MainWindow(QMainWindow):
             self.worker.cancel_transcript()
 
     def _on_transcribed(self, text):
-        fillers = count_fillers(text)
-        self._session_fillers += fillers
         self.history.append(f"You: {text}")
         self._append("\nDogen: ")
         self._assistant_open = True
@@ -816,9 +813,15 @@ class MainWindow(QMainWindow):
 
     def _on_completed(self, result, latency_ms):
         try:
-            self.db.add_turn(self.session_id, result.transcript, result.reply,
-                             self._selected_model(), latency_ms)
-            self.db.save_feedback(self.session_id, result.feedback)
+            self.db.add_completed_turn(
+                self.session_id,
+                result.transcript,
+                result.reply,
+                self._selected_model(),
+                latency_ms,
+                result.feedback,
+                result.metrics,
+            )
             self._render_history()
             self._update_stats()
             self._last_assistant_text = result.reply
@@ -914,12 +917,10 @@ class MainWindow(QMainWindow):
             self.stop()
             return
         stats = self.db.session_full_stats(self.session_id)
-        stats["fillers"] = self._session_fillers
         dlg = SessionSummaryDialog(stats, parent=self)
         result = dlg.exec_()
         if result == SessionSummaryDialog.NEW_SESSION:
             self.session_id = uuid.uuid4().hex
-            self._session_fillers = 0
             self.context.reset()
             self._pipeline = None
             self._render_history()

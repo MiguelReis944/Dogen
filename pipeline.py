@@ -7,7 +7,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from nlp.feedback import CoachFeedback, parse_reply
+from nlp.filler_words import count_fillers
 from nlp.llm import ConversationContext
+from storage.models import TurnMetrics
 
 # Split on sentence-ending punctuation, keeping the delimiter with the left side.
 _SENTENCE_END_RE = re.compile(r'(?<=[.!?])\s+')
@@ -46,6 +48,7 @@ class TurnResult:
     transcript: str
     reply: str
     feedback: CoachFeedback
+    metrics: TurnMetrics | None = None
 
 
 class ProcessingPipeline:
@@ -79,6 +82,7 @@ class ProcessingPipeline:
             raise TurnCancelled()
         emit("processing", "Transcribing...")
         transcript = self.transcriber.transcribe(audio).strip()
+        original_transcript = transcript
         if cancelled():
             raise TurnCancelled()
         if not transcript:
@@ -152,4 +156,10 @@ class ProcessingPipeline:
             raise TurnCancelled()
         context.add_message("user", transcript)
         context.add_message("assistant", parsed.message)
-        return TurnResult(transcript, parsed.message, parsed.feedback)
+        metrics = TurnMetrics(
+            word_count=len(re.findall(r"\b[\w']+\b", transcript)),
+            filler_count=count_fillers(transcript),
+            transcript_edited=" ".join(transcript.split()) != " ".join(original_transcript.split()),
+            correction_category=parsed.feedback.category,
+        )
+        return TurnResult(transcript, parsed.message, parsed.feedback, metrics)

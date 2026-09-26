@@ -10,6 +10,7 @@ from nlp.llm import ConversationContext, OllamaClient
 from nlp.feedback import CoachFeedback
 from nlp.transcriber import _looks_like_silence
 from storage.db import Database
+from storage.models import TurnMetrics
 from utils.config import AppConfig, load_config, save_config
 from audio.vad import VoiceDetector
 
@@ -274,6 +275,39 @@ def test_database_saves_structured_feedback_only_when_present(tmp_path):
         ).fetchall()
 
     assert rows == [("I goed → I went", "I went there.", "verb_tense")]
+
+
+def test_database_persists_completed_turn_metrics(tmp_path):
+    path = tmp_path / "conversations.db"
+    metrics = TurnMetrics(
+        word_count=4,
+        filler_count=0,
+        transcript_edited=True,
+        correction_category="verb_tense",
+    )
+    feedback = CoachFeedback(correction="I goed → I went", category="verb_tense")
+    with Database(path) as db:
+        db.add_completed_turn("s1", "I went home", "Tell me more.", "mistral", 120, feedback, metrics)
+        row = db.connection.execute(
+            "SELECT word_count,filler_count,transcript_edited,correction_category "
+            "FROM turn_metrics"
+        ).fetchone()
+        stats = db.session_full_stats("s1")
+
+    assert row == (4, 0, 1, "verb_tense")
+    assert stats["fillers"] == 0
+
+
+def test_completed_turn_write_is_atomic(tmp_path):
+    path = tmp_path / "conversations.db"
+    metrics = TurnMetrics(0, 0, False, None)
+    with Database(path) as db:
+        with pytest.raises(sqlite3.IntegrityError):
+            db.add_completed_turn(
+                "s1", "Hello", None, "mistral", 10, CoachFeedback(), metrics
+            )
+        assert db.recent_messages("s1", 10) == []
+        assert db.connection.execute("SELECT COUNT(*) FROM turn_metrics").fetchone()[0] == 0
 
 
 def test_vad_seeds_from_initial_noise_floor():

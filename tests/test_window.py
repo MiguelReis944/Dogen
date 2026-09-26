@@ -9,6 +9,7 @@ from nlp.llm import ConversationContext
 from nlp.feedback import CoachFeedback
 from pipeline import TurnResult
 from storage.db import Database
+from storage.models import TurnMetrics
 from ui.main_window import MainWindow
 from ui.settings_dialog import SettingsDialog
 from utils.config import AppConfig
@@ -145,7 +146,10 @@ def test_response_audio_controls_follow_replay_state(tmp_path):
         assert not window.stop_audio_button.isEnabled()
 
         window._pipeline = object()
-        window._on_completed(TurnResult("Hello", "Hi there", CoachFeedback()), 100)
+        window._on_completed(
+            TurnResult("Hello", "Hi there", CoachFeedback(), TurnMetrics(1, 0, False, None)),
+            100,
+        )
         window._on_waiting_for_ptt()
 
         assert window.replay_response_button.isEnabled()
@@ -165,6 +169,7 @@ def test_completed_turn_renders_and_persists_feedback_separately(tmp_path):
                 better_phrasing="I headed home.",
                 category="verb_tense",
             ),
+            TurnMetrics(3, 0, False, "verb_tense"),
         )
 
         window._on_completed(result, 100)
