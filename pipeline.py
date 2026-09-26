@@ -4,7 +4,9 @@ import queue
 import re
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 
+from nlp.feedback import CoachFeedback, parse_reply
 from nlp.llm import ConversationContext
 
 # Split on sentence-ending punctuation, keeping the delimiter with the left side.
@@ -37,6 +39,13 @@ _DONE = object()
 
 class TurnCancelled(Exception):
     pass
+
+
+@dataclass(frozen=True)
+class TurnResult:
+    transcript: str
+    reply: str
+    feedback: CoachFeedback
 
 
 class ProcessingPipeline:
@@ -135,11 +144,12 @@ class ProcessingPipeline:
         if llm_errors:
             raise llm_errors[0]
 
-        reply = _strip_null_annotations("".join(reply_chunks).strip())
-        if not reply:
+        raw_reply = _strip_null_annotations("".join(reply_chunks).strip())
+        parsed = parse_reply(raw_reply)
+        if not parsed.message:
             raise RuntimeError("Ollama returned an empty response")
         if cancelled():
             raise TurnCancelled()
         context.add_message("user", transcript)
-        context.add_message("assistant", reply)
-        return transcript, reply
+        context.add_message("assistant", parsed.message)
+        return TurnResult(transcript, parsed.message, parsed.feedback)

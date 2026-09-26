@@ -7,6 +7,7 @@ import pytest
 
 from audio.recorder import Recorder, RecordingResult
 from nlp.llm import ConversationContext, OllamaClient
+from nlp.feedback import CoachFeedback
 from nlp.transcriber import _looks_like_silence
 from storage.db import Database
 from utils.config import AppConfig, load_config, save_config
@@ -254,6 +255,25 @@ def test_session_full_stats_counts_turns_and_corrections(tmp_path):
         assert stats["vocab"][0].original == "I goed"
         assert stats["vocab"][0].corrected == "I went"
         assert stats["minutes"] >= 0
+
+
+def test_database_saves_structured_feedback_only_when_present(tmp_path):
+    path = tmp_path / "conversations.db"
+    with Database(path) as db:
+        db.save_feedback("s1", CoachFeedback())
+        db.save_feedback(
+            "s1",
+            CoachFeedback(
+                correction="I goed → I went",
+                better_phrasing="I went there.",
+                category="verb_tense",
+            ),
+        )
+        rows = db.connection.execute(
+            "SELECT correction,better_phrasing,category FROM feedback"
+        ).fetchall()
+
+    assert rows == [("I goed → I went", "I went there.", "verb_tense")]
 
 
 def test_vad_seeds_from_initial_noise_floor():

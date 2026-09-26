@@ -18,6 +18,7 @@ from PyQt5.QtWidgets import (QAction, QComboBox, QFileDialog, QHBoxLayout,
 from audio.player import Player
 from audio.recorder import Recorder
 from nlp.filler_words import count_fillers, highlight_fillers_html
+from nlp.feedback import CoachFeedback
 from nlp.llm import (SCENARIOS, ConversationContext, OllamaClient,
                      build_system_prompt)
 from nlp.synthesizer import Synthesizer
@@ -73,7 +74,7 @@ class ConversationWorker(QThread):
     audio_playing     = pyqtSignal()
     error             = pyqtSignal(str)
     ready             = pyqtSignal()
-    turn_completed    = pyqtSignal(str, str, int)
+    turn_completed    = pyqtSignal(object, int)
     volume_level      = pyqtSignal(float)
     speech_level      = pyqtSignal(float)   # TTS playback amplitude, drives the pet's mouth
 
@@ -288,7 +289,7 @@ class ConversationWorker(QThread):
                         confirm_fn=confirm_fn,
                     )
                     if result:
-                        self.turn_completed.emit(*result, int((time.monotonic() - started) * 1000))
+                        self.turn_completed.emit(result, int((time.monotonic() - started) * 1000))
                 except TurnCancelled:
                     self._playback_active = False
                     if self._barge_in and not self.isInterruptionRequested():
@@ -666,7 +667,22 @@ class MainWindow(QMainWindow):
         messages = self.db.recent_messages(self.session_id, 200)
         for message in messages:
             self.history.append(self._format_message(message.role, message.content))
+        for feedback in self.db.feedback_for_session(self.session_id):
+            self.history.append(self._format_feedback(feedback))
         self._assistant_open = False
+
+    def _format_feedback(self, feedback: CoachFeedback):
+        lines = ["<b>Coach feedback</b>"]
+        if feedback.correction:
+            lines.append(f'<span style="color:#e67e22">Correction: {html.escape(feedback.correction)}</span>')
+        if feedback.better_phrasing:
+            lines.append(
+                f'<span style="color:#27ae60">Better phrasing: '
+                f'{html.escape(feedback.better_phrasing)}</span>'
+            )
+        if feedback.category:
+            lines.append(f"Category: {html.escape(feedback.category.replace('_', ' '))}")
+        return "<br>".join(lines)
 
     # ── start / stop ───────────────────────────────────────────────────────────
 
@@ -798,13 +814,14 @@ class MainWindow(QMainWindow):
         self.pet.set_state("idle")
         self.status.setText(text)
 
-    def _on_completed(self, user_text, assistant_text, latency_ms):
+    def _on_completed(self, result, latency_ms):
         try:
-            self.db.add_turn(self.session_id, user_text, assistant_text,
+            self.db.add_turn(self.session_id, result.transcript, result.reply,
                              self._selected_model(), latency_ms)
+            self.db.save_feedback(self.session_id, result.feedback)
             self._render_history()
             self._update_stats()
-            self._last_assistant_text = assistant_text
+            self._last_assistant_text = result.reply
             self._last_error = None
         except Exception as exc:
             logging.exception("Could not save conversation turn")

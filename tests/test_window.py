@@ -6,6 +6,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt5.QtWidgets import QApplication
 
 from nlp.llm import ConversationContext
+from nlp.feedback import CoachFeedback
+from pipeline import TurnResult
 from storage.db import Database
 from ui.main_window import MainWindow
 from ui.settings_dialog import SettingsDialog
@@ -143,9 +145,34 @@ def test_response_audio_controls_follow_replay_state(tmp_path):
         assert not window.stop_audio_button.isEnabled()
 
         window._pipeline = object()
-        window._on_completed("Hello", "Hi there", 100)
+        window._on_completed(TurnResult("Hello", "Hi there", CoachFeedback()), 100)
         window._on_waiting_for_ptt()
 
         assert window.replay_response_button.isEnabled()
         assert db.session_stats("session")["turns"] == 1
+        window.close()
+
+
+def test_completed_turn_renders_and_persists_feedback_separately(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        result = TurnResult(
+            "I goed home",
+            "What did you do there?",
+            CoachFeedback(
+                correction="I goed home → I went home",
+                better_phrasing="I headed home.",
+                category="verb_tense",
+            ),
+        )
+
+        window._on_completed(result, 100)
+
+        text = window.history.toPlainText()
+        assert "What did you do there?" in text
+        assert "Coach feedback" in text
+        assert "I goed home → I went home" in text
+        assert db.feedback_for_session("session") == [result.feedback]
+        assert db.recent_messages("session", 2)[1].content == "What did you do there?"
         window.close()

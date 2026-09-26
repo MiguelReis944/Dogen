@@ -5,6 +5,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+from nlp.feedback import CoachFeedback, correction_pair
 from storage.models import Message, VocabItem
 
 _CORRECTION_RE = re.compile(r'\[Correction:\s*(.+?)\s*→\s*(.+?)\]')
@@ -59,6 +60,15 @@ class Database:
             corrected TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS vocab_session ON vocab(session_id, id);
+        CREATE TABLE IF NOT EXISTS feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            correction TEXT,
+            better_phrasing TEXT,
+            category TEXT
+        );
+        CREATE INDEX IF NOT EXISTS feedback_session ON feedback(session_id, id);
         """)
 
     # ── conversations ──────────────────────────────────────────────────────────
@@ -139,6 +149,35 @@ class Database:
                 "INSERT INTO vocab(session_id,original,corrected) VALUES(?,?,?)",
                 [(session_id, orig.strip(), corr.strip()) for orig, corr in pairs],
             )
+
+    def save_feedback(self, session_id: str, feedback: CoachFeedback) -> None:
+        if feedback.is_empty:
+            return
+        with self.connection:
+            self.connection.execute(
+                "INSERT INTO feedback(session_id,correction,better_phrasing,category) "
+                "VALUES(?,?,?,?)",
+                (
+                    session_id,
+                    feedback.correction,
+                    feedback.better_phrasing,
+                    feedback.category,
+                ),
+            )
+            pair = correction_pair(feedback)
+            if pair:
+                self.connection.execute(
+                    "INSERT INTO vocab(session_id,original,corrected) VALUES(?,?,?)",
+                    (session_id, pair[0], pair[1]),
+                )
+
+    def feedback_for_session(self, session_id: str) -> list[CoachFeedback]:
+        rows = self.connection.execute(
+            "SELECT correction,better_phrasing,category FROM feedback "
+            "WHERE session_id=? ORDER BY id",
+            (session_id,),
+        ).fetchall()
+        return [CoachFeedback(*row) for row in rows]
 
     def session_full_stats(self, session_id: str) -> dict:
         row = self.connection.execute(

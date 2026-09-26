@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 
 from nlp.llm import ConversationContext
-from pipeline import ProcessingPipeline, TurnCancelled, _for_tts, _strip_null_annotations
+from nlp.feedback import CoachFeedback
+from pipeline import ProcessingPipeline, TurnCancelled, TurnResult, _for_tts, _strip_null_annotations
 
 
 class FakeTranscriber:
@@ -32,7 +33,7 @@ def test_pipeline_turn_updates_context_and_reports_events():
     context = ConversationContext()
     pipeline = ProcessingPipeline(FakeTranscriber(), FakeLLM(), FakeSynthesizer(), FakePlayer())
     result = pipeline.run([0.1], context, lambda kind, value: events.append((kind, value)), lambda: False)
-    assert result == ("I goed to school", "I went to school.")
+    assert result == TurnResult("I goed to school", "I went to school.", CoachFeedback())
     assert [item["role"] for item in context.messages] == ["user", "assistant"]
     kinds = [kind for kind, _ in events]
     assert kinds == ["processing", "transcribed", "response_chunk", "audio_playing"]
@@ -105,7 +106,7 @@ def test_pipeline_confirm_fn_replaces_transcript_before_llm():
         [0.1], context, lambda kind, value: events.append((kind, value)), lambda: False,
         confirm_fn=lambda text: "I went to school",
     )
-    assert result == ("I went to school", "Great!")
+    assert result == TurnResult("I went to school", "Great!", CoachFeedback())
     assert ("transcribed", "I went to school") in events
     assert [m["content"] for m in context.messages] == ["I went to school", "Great!"]
 
@@ -185,3 +186,34 @@ def test_speak_stops_between_audio_chunks_when_cancelled():
 
     with pytest.raises(TurnCancelled):
         pipeline.speak("Two chunks.", lambda kind, value: None, lambda: cancelled)
+
+
+def test_pipeline_returns_message_and_structured_feedback_separately():
+    class CoachingLLM:
+        def generate(self, messages, on_chunk, cancelled):
+            response = (
+                "What did you buy?\n"
+                "[Correction: I go yesterday → I went yesterday]\n"
+                "[Better phrasing: I stopped by yesterday.]\n"
+                "[Category: verb_tense]"
+            )
+            on_chunk(response)
+            return response
+
+    context = ConversationContext()
+    pipeline = ProcessingPipeline(
+        FakeTranscriber(), CoachingLLM(), FakeSynthesizer(), FakePlayer()
+    )
+
+    result = pipeline.run([0.1], context, lambda kind, value: None, lambda: False)
+
+    assert result == TurnResult(
+        transcript="I goed to school",
+        reply="What did you buy?",
+        feedback=CoachFeedback(
+            correction="I go yesterday → I went yesterday",
+            better_phrasing="I stopped by yesterday.",
+            category="verb_tense",
+        ),
+    )
+    assert context.messages[-1]["content"] == "What did you buy?"
