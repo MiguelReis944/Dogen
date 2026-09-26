@@ -42,6 +42,11 @@ class SettingsDialog(QDialog):
         self._review.setObjectName("transcriptReviewCheck")
         self._review.setChecked(config.review_transcript)
         form1.addRow("", self._review)
+
+        self._noise_reduction = QCheckBox("Reduce background noise after recording")
+        self._noise_reduction.setObjectName("noiseReductionCheck")
+        self._noise_reduction.setChecked(config.noise_reduction)
+        form1.addRow("", self._noise_reduction)
         outer.addWidget(stt_box)
 
         # ── Voice Detection ────────────────────────────────────────────────────
@@ -97,6 +102,7 @@ class SettingsDialog(QDialog):
     def _save(self):
         self.config.whisper_model       = self._whisper.currentText()
         self.config.review_transcript   = self._review.isChecked()
+        self.config.noise_reduction     = self._noise_reduction.isChecked()
         self.config.vad_threshold       = self._threshold.value()
         self.config.silence_duration_sec = self._silence.value()
         self.config.input_mode          = self._input_mode.currentData()

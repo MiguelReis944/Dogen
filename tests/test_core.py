@@ -42,6 +42,36 @@ def test_recorder_reports_ptt_release(monkeypatch):
     assert result.duration_sec >= 0
 
 
+def test_recorder_applies_noise_reduction_when_enabled(monkeypatch):
+    _fake_sounddevice(monkeypatch, [np.ones(3200, dtype=np.float32)])
+    calls = []
+
+    def denoise(samples, rate):
+        calls.append((samples.copy(), rate))
+        return samples
+
+    monkeypatch.setattr("audio.recorder._denoise", denoise)
+
+    Recorder(noise_reduction=True).record(lambda: False, stop_fn=lambda: True)
+
+    assert len(calls) == 1
+    assert calls[0][1] == 16000
+
+
+def test_recorder_skips_noise_reduction_when_disabled(monkeypatch):
+    _fake_sounddevice(monkeypatch, [np.ones(3200, dtype=np.float32)])
+
+    def unexpected_denoise(samples, rate):
+        raise AssertionError("denoise must not run")
+
+    monkeypatch.setattr("audio.recorder._denoise", unexpected_denoise)
+
+    result = Recorder(noise_reduction=False).record(lambda: False, stop_fn=lambda: True)
+
+    assert result.samples.dtype == np.float32
+    assert result.samples.size == 3200
+
+
 def test_recorder_reports_silence(monkeypatch):
     _fake_sounddevice(
         monkeypatch,
@@ -157,6 +187,7 @@ def test_fresh_config_uses_safe_push_to_talk_defaults():
 
     assert config.input_mode == "ptt"
     assert config.silence_duration_sec == 2.0
+    assert config.noise_reduction is True
 
 
 def test_existing_turn_settings_are_preserved(tmp_path):

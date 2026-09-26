@@ -72,3 +72,16 @@ failed or stuck turns / attempts
 ## Formal baseline status
 
 The full 120-attempt protocol requires the learner's microphone, room conditions, and spoken English. It remains pending and must be completed before selecting a new Whisper model or claiming a measured accuracy improvement. Implementation may add observability and evaluation tooling without presenting the initial field sample as a statistically valid benchmark.
+
+## Transcription comparison
+
+The reproducible evaluator is available at `scripts/evaluate_transcription.py`. The same private manifest must be used for every row.
+
+| Whisper model | Noise reduction | Median WER | Manual edits | Model load | Median clip runtime |
+|---|---:|---:|---:|---:|---:|
+| `small.en` | on | pending | pending | pending | pending |
+| `small.en` | off | pending | pending | pending | pending |
+| `medium.en` | on | pending | pending | pending | pending |
+| `medium.en` | off | pending | pending | pending | pending |
+
+Decision: retain `small.en` with noise reduction enabled until the full private corpus is recorded. The single `upgrade` → `pigrade` error is useful evidence but is not enough to justify a slower default model or claim a measured improvement.

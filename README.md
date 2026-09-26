@@ -53,9 +53,19 @@ Cada dia começa uma sessão nova. Dentro do mesmo dia, retomar o app continua d
 | `silence_duration_sec` | `2.0` | segundos de silêncio para encerrar o turno automático |
 | `input_mode` | `ptt` | `ptt` para controle manual ou `vad` para envio automático |
 | `review_transcript` | `false` | permite editar a transcrição antes de enviá-la |
+| `noise_reduction` | `true` | aplica redução de ruído depois da captura; pode ser desligada para comparar clareza |
 | `context_size` | `10` | pares de mensagens mantidos em contexto |
 
 Para dispositivos de áudio específicos, rode `python -m sounddevice` para listar os índices e edite `mic_device` / `speaker_device`.
+
+Para comparar modelos com gravações privadas, crie `local-evaluation/manifest.json` conforme o protocolo em `docs/quality/daily-practice-baseline.md` e execute:
+
+```powershell
+python scripts/evaluate_transcription.py --manifest local-evaluation/manifest.json --model small.en --output small-clean.evaluation.json
+python scripts/evaluate_transcription.py --manifest local-evaluation/manifest.json --model small.en --no-noise-reduction --output small-raw.evaluation.json
+```
+
+Os áudios e relatórios `*.evaluation.json` são ignorados pelo Git.
 
 **Voz mais natural:** troque `tts_model` por `tts_models/multilingual/multi-dataset/xtts_v2` e execute `python -c "from TTS.api import TTS; TTS('tts_models/multilingual/multi-dataset/xtts_v2')"` para baixar o modelo.
 

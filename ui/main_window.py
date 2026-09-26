@@ -215,8 +215,12 @@ class ConversationWorker(QThread):
                 )
             self.built_pipeline = pipeline
 
-            recorder = Recorder(self.config.mic_device, self.config.vad_threshold,
-                                 self.config.silence_duration_sec)
+            recorder = Recorder(
+                self.config.mic_device,
+                self.config.vad_threshold,
+                self.config.silence_duration_sec,
+                self.config.noise_reduction,
+            )
 
             # Warmup: wait for Ollama and pre-load the model into RAM
             while not self._cancelled():

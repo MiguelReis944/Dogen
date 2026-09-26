@@ -22,6 +22,7 @@ class AppConfig:
     context_size: int = 10
     input_mode: str = "ptt"  # "vad" | "ptt"
     review_transcript: bool = False  # show editable transcript before sending to LLM
+    noise_reduction: bool = True
     system_prompt: str = SYSTEM_PROMPT
 
     def __post_init__(self):

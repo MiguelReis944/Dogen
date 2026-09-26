@@ -20,10 +20,12 @@ class RecordingResult:
 class Recorder:
     sample_rate = 16000
 
-    def __init__(self, device=None, threshold=0.02, silence_duration_sec=2.0):
+    def __init__(self, device=None, threshold=0.02, silence_duration_sec=2.0,
+                 noise_reduction=True):
         self.device = device
         self.threshold = threshold
         self.silence_duration_sec = silence_duration_sec
+        self.noise_reduction = noise_reduction
         self._noise_floor = 0.0  # carried across turns so the room's noise floor keeps adapting
 
     def record(self, cancelled, on_volume=None, stop_fn=None):
@@ -89,7 +91,7 @@ class Recorder:
         has_audio = (stop_fn is not None) or (detector.heard_voice)
         if not has_audio or samples.size < min_samples:
             samples = np.empty(0, dtype=np.float32)
-        else:
+        elif self.noise_reduction:
             samples = _denoise(samples, self.sample_rate).astype(np.float32, copy=False)
         return RecordingResult(samples, stop_reason, duration_sec)
 
