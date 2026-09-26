@@ -46,6 +46,24 @@ class ProcessingPipeline:
         self.synthesizer = synthesizer
         self.player = player
 
+    def speak(self, text: str, emit: Callable[[str, object], None],
+              cancelled: Callable[[], bool]) -> None:
+        spoken = _for_tts(text)
+        if not spoken:
+            return
+        emit("audio_playing", "")
+        for wav, sample_rate in self.synthesizer.synthesize_stream(spoken):
+            if cancelled():
+                raise TurnCancelled()
+            self.player.play(
+                wav,
+                sample_rate,
+                cancelled,
+                on_volume=lambda rms: emit("speech_volume", str(rms)),
+            )
+            if cancelled():
+                raise TurnCancelled()
+
     def run(self, audio, context: ConversationContext, emit: Callable[[str, str], None],
             cancelled: Callable[[], bool], confirm_fn: Callable[[str], str] | None = None):
         if cancelled():
@@ -103,23 +121,15 @@ class ProcessingPipeline:
         llm_thread = threading.Thread(target=_stream_llm, daemon=True)
         llm_thread.start()
 
-        emit("audio_playing", "")
         while True:
             item = sentence_q.get()
             if item is _DONE:
                 break
-            if cancelled():
+            try:
+                self.speak(item, emit, cancelled)
+            except TurnCancelled:
                 llm_thread.join(timeout=2)
-                raise TurnCancelled()
-            spoken = _for_tts(item)
-            if not spoken:
-                continue  # correction-only fragment, show in UI but skip TTS
-            for wav, sr in self.synthesizer.synthesize_stream(spoken):
-                if cancelled():
-                    llm_thread.join(timeout=2)
-                    raise TurnCancelled()
-                self.player.play(wav, sr, cancelled,
-                                 on_volume=lambda rms: emit("speech_volume", str(rms)))
+                raise
 
         llm_thread.join(timeout=5)
         if llm_errors:

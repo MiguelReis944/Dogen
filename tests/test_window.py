@@ -130,3 +130,22 @@ def test_pause_presets_persist_exact_seconds(tmp_path):
 
     assert config.silence_duration_sec == 3.0
     dialog.close()
+
+
+def test_response_audio_controls_follow_replay_state(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+
+        assert window.replay_response_button.objectName() == "replayResponseButton"
+        assert window.stop_audio_button.objectName() == "stopAudioButton"
+        assert not window.replay_response_button.isEnabled()
+        assert not window.stop_audio_button.isEnabled()
+
+        window._pipeline = object()
+        window._on_completed("Hello", "Hi there", 100)
+        window._on_waiting_for_ptt()
+
+        assert window.replay_response_button.isEnabled()
+        assert db.session_stats("session")["turns"] == 1
+        window.close()

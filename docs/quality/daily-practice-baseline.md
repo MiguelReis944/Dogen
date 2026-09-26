@@ -85,3 +85,14 @@ The reproducible evaluator is available at `scripts/evaluate_transcription.py`. 
 | `medium.en` | off | pending | pending | pending | pending |
 
 Decision: retain `small.en` with noise reduction enabled until the full private corpus is recorded. The single `upgrade` → `pigrade` error is useful evidence but is not enough to justify a slower default model or claim a measured improvement.
+
+## Local voice comparison
+
+Five fixed English sentences were synthesized on the user's Windows CPU environment.
+
+| Voice | Cached | Startup | Sentence synthesis | Result |
+|---|---:|---:|---:|---|
+| LJSpeech Tacotron2-DDC | yes | 14.785 s | 0.611–0.827 s | operational; retained as default |
+| SAM Tacotron-DDC | yes | failed before synthesis | not measured | eSpeak backend unavailable in the measurement process |
+
+The field video confirms that LJSpeech narration completes in the real application. Subjective naturalness and intelligibility were not scored from silent benchmark generation. The default remains LJSpeech because it is the only configured voice validated end to end; no new model dependency is justified by the available evidence.

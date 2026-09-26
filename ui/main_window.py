@@ -116,6 +116,10 @@ class ConversationWorker(QThread):
         self._confirmed_text = ""
         self._confirm_event.set()
 
+    def stop_playback(self):
+        if self._playback_active:
+            self._barge_in = True
+
     def _make_confirm_fn(self):
         def _confirm(transcript: str) -> str:
             self._confirmed_text = transcript
@@ -312,6 +316,32 @@ class ConversationWorker(QThread):
                 self._barge_in_thread.join(timeout=1)
 
 
+class ReplayWorker(QThread):
+    audio_playing = pyqtSignal()
+    speech_level = pyqtSignal(float)
+    error = pyqtSignal(str)
+
+    def __init__(self, pipeline, text, parent=None):
+        super().__init__(parent)
+        self.pipeline = pipeline
+        self.text = text
+
+    def _emit_progress(self, kind, value):
+        if kind == "audio_playing":
+            self.audio_playing.emit()
+        elif kind == "speech_volume":
+            self.speech_level.emit(float(value))
+
+    def run(self):
+        try:
+            self.pipeline.speak(self.text, self._emit_progress, self.isInterruptionRequested)
+        except TurnCancelled:
+            pass
+        except Exception as exc:
+            logging.exception("Response replay failed")
+            self.error.emit(str(exc))
+
+
 # ── MainWindow ──────────────────────────────────────────────────────────────────
 
 
@@ -327,6 +357,8 @@ class MainWindow(QMainWindow):
         self.settings_path = settings_path
         self.worker = None
         self._pipeline = None
+        self._replay_worker = None
+        self._last_assistant_text = ""
         self._assistant_open = False
         self._closing = False
         self._last_error = None
@@ -428,7 +460,15 @@ class MainWindow(QMainWindow):
         self.start_button = QPushButton("Start Recording")
         self.stop_button = QPushButton("Stop")
         self.stop_button.setEnabled(False)
+        self.replay_response_button = QPushButton("Replay response")
+        self.replay_response_button.setObjectName("replayResponseButton")
+        self.replay_response_button.setEnabled(False)
+        self.stop_audio_button = QPushButton("Stop audio")
+        self.stop_audio_button.setObjectName("stopAudioButton")
+        self.stop_audio_button.setEnabled(False)
         bottom_row.addWidget(self.start_button)
+        bottom_row.addWidget(self.replay_response_button)
+        bottom_row.addWidget(self.stop_audio_button)
         bottom_row.addWidget(self.stop_button)
         layout.addLayout(bottom_row)
 
@@ -465,6 +505,8 @@ class MainWindow(QMainWindow):
 
         self.setCentralWidget(body)
         self.start_button.clicked.connect(self.start)
+        self.replay_response_button.clicked.connect(self._replay_response)
+        self.stop_audio_button.clicked.connect(self._stop_audio)
         self.stop_button.clicked.connect(self.stop)
 
         self._render_history()
@@ -634,6 +676,7 @@ class MainWindow(QMainWindow):
         self.model_combo.setEnabled(False)
         self.voice_combo.setEnabled(False)
         self.scenario_combo.setEnabled(False)
+        self.replay_response_button.setEnabled(False)
         self.worker = ConversationWorker(
             self.config, self.context, self._selected_model(), self._pipeline, self
         )
@@ -673,6 +716,8 @@ class MainWindow(QMainWindow):
         self.vol_bar.setVisible(True)
         self.vol_bar.setValue(0)
         self.pet.set_state("listening")
+        self.replay_response_button.setEnabled(False)
+        self.stop_audio_button.setEnabled(False)
         label = "Release to send" if self.config.input_mode == "ptt" else "Recording..."
         self.status.setText(label)
 
@@ -682,6 +727,9 @@ class MainWindow(QMainWindow):
     def _on_waiting_for_ptt(self):
         self.vol_bar.setVisible(False)
         self.pet.set_state("idle")
+        pipeline = self._pipeline or (self.worker.built_pipeline if self.worker else None)
+        self.replay_response_button.setEnabled(bool(self._last_assistant_text and pipeline))
+        self.stop_audio_button.setEnabled(False)
         self.status.setText("Hold Space or the microphone button to speak")
 
     def _on_volume(self, rms: float):
@@ -691,10 +739,13 @@ class MainWindow(QMainWindow):
     def _on_audio_playing(self):
         self.pet.set_state("speaking")
         self.status.setText("Playing audio...")
+        self.replay_response_button.setEnabled(False)
+        self.stop_audio_button.setEnabled(True)
 
     def _on_ready(self):
         self.vol_bar.setVisible(False)
         self.pet.set_state("idle")
+        self.stop_audio_button.setEnabled(False)
         if self._last_error is None:
             self.status.setText(self._idle_instruction())
 
@@ -753,6 +804,7 @@ class MainWindow(QMainWindow):
                              self._selected_model(), latency_ms)
             self._render_history()
             self._update_stats()
+            self._last_assistant_text = assistant_text
             self._last_error = None
         except Exception as exc:
             logging.exception("Could not save conversation turn")
@@ -774,6 +826,8 @@ class MainWindow(QMainWindow):
         self.model_combo.setEnabled(True)
         self.voice_combo.setEnabled(True)
         self.scenario_combo.setEnabled(True)
+        self.stop_audio_button.setEnabled(False)
+        self.replay_response_button.setEnabled(bool(self._last_assistant_text and self._pipeline))
         if self._last_error is None:
             self.status.setText(self._idle_instruction())
         if self._closing:
@@ -792,6 +846,39 @@ class MainWindow(QMainWindow):
         if self.config.input_mode == "ptt":
             return "Hold Space or the microphone button to speak"
         return "Start speaking; Dogen sends after the selected pause"
+
+    def _replay_response(self):
+        pipeline = self._pipeline or (self.worker.built_pipeline if self.worker else None)
+        if not self._last_assistant_text or pipeline is None:
+            return
+        if self._replay_worker and self._replay_worker.isRunning():
+            return
+        self.replay_response_button.setEnabled(False)
+        self._replay_worker = ReplayWorker(pipeline, self._last_assistant_text, self)
+        self._replay_worker.audio_playing.connect(self._on_audio_playing)
+        self._replay_worker.speech_level.connect(self.pet.set_volume)
+        self._replay_worker.error.connect(self._on_replay_error)
+        self._replay_worker.finished.connect(self._on_replay_finished)
+        self._replay_worker.start()
+
+    def _stop_audio(self):
+        if self._replay_worker and self._replay_worker.isRunning():
+            self._replay_worker.requestInterruption()
+        if self.worker and self.worker.isRunning():
+            self.worker.stop_playback()
+        self.stop_audio_button.setEnabled(False)
+
+    def _on_replay_error(self, text):
+        self._last_error = f"Could not play this response: {text}"
+        self.status.setText(self._last_error)
+
+    def _on_replay_finished(self):
+        self.stop_audio_button.setEnabled(False)
+        self.pet.set_state("idle")
+        pipeline = self._pipeline or (self.worker.built_pipeline if self.worker else None)
+        self.replay_response_button.setEnabled(bool(self._last_assistant_text and pipeline))
+        if self._last_error is None:
+            self.status.setText(self._idle_instruction())
 
     # ── settings ───────────────────────────────────────────────────────────────
 

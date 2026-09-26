@@ -131,3 +131,57 @@ def test_for_tts_strips_ellipsis_that_breaks_the_phonemizer():
 def test_strip_null_annotations_removes_empty_correction_markers():
     text = 'Great job! [Correction: None] [Explanation: no errors to correct]'
     assert _strip_null_annotations(text) == "Great job!"
+
+
+def test_speak_replays_clean_text_without_conversation_side_effects():
+    synthesized = []
+    played = []
+
+    class RecordingSynthesizer:
+        def synthesize_stream(self, text):
+            synthesized.append(text)
+            yield [0.1], 22050
+
+    class RecordingPlayer:
+        def play(self, samples, sample_rate, cancelled, on_volume=None):
+            played.append((samples, sample_rate))
+
+    class ForbiddenLLM:
+        def generate(self, *args, **kwargs):
+            raise AssertionError("replay must not call the LLM")
+
+    pipeline = ProcessingPipeline(
+        FakeTranscriber(), ForbiddenLLM(), RecordingSynthesizer(), RecordingPlayer()
+    )
+    events = []
+
+    pipeline.speak(
+        "Nice work. [Correction: I goed → I went]",
+        lambda kind, value: events.append((kind, value)),
+        lambda: False,
+    )
+
+    assert synthesized == ["Nice work."]
+    assert played == [([0.1], 22050)]
+    assert events[0] == ("audio_playing", "")
+
+
+def test_speak_stops_between_audio_chunks_when_cancelled():
+    cancelled = False
+
+    class TwoChunkSynthesizer:
+        def synthesize_stream(self, text):
+            yield [0.1], 22050
+            yield [0.2], 22050
+
+    class CancellingPlayer:
+        def play(self, samples, sample_rate, is_cancelled, on_volume=None):
+            nonlocal cancelled
+            cancelled = True
+
+    pipeline = ProcessingPipeline(
+        FakeTranscriber(), FakeLLM(), TwoChunkSynthesizer(), CancellingPlayer()
+    )
+
+    with pytest.raises(TurnCancelled):
+        pipeline.speak("Two chunks.", lambda kind, value: None, lambda: cancelled)

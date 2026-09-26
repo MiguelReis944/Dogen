@@ -20,6 +20,8 @@ O modo padrão é **Push-to-talk**: segure Espaço ou o botão do microfone enqu
 
 O modo **Automatic** encerra o turno depois do intervalo configurado. Em **Settings**, escolha Short (1,2 s), Normal (2,0 s), Long (3,0 s) ou um valor personalizado. Ative **Review transcript before sending** para corrigir o texto reconhecido antes de enviá-lo ao coach; a revisão é enviada automaticamente depois de cinco segundos se não houver edição.
 
+Depois de uma resposta completa, use **Replay response** para ouvi-la novamente ou **Stop audio** para interromper a fala. Repetir uma resposta não cria outro turno, não chama o Ollama e não altera as estatísticas.
+
 ## Pipeline de um turno
 
 ```
