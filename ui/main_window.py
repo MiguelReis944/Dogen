@@ -24,7 +24,9 @@ from nlp.llm import (SCENARIOS, ConversationContext, OllamaClient,
 from nlp.synthesizer import Synthesizer
 from nlp.transcriber import Transcriber
 from pipeline import ProcessingPipeline, TurnCancelled
+from storage.progress import ProgressService
 from ui.pet_widget import PetWidget
+from ui.progress_dialog import ProgressDialog
 from ui.session_summary_dialog import SessionSummaryDialog
 from ui.settings_dialog import SettingsDialog
 from ui.vocab_dialog import VocabDialog
@@ -525,6 +527,11 @@ class MainWindow(QMainWindow):
         settings_action.triggered.connect(self._open_settings)
         file_menu.addAction(settings_action)
 
+        self.progress_action = QAction("Progress…", self)
+        self.progress_action.setObjectName("progressAction")
+        self.progress_action.triggered.connect(self._show_progress)
+        file_menu.addAction(self.progress_action)
+
         file_menu.addSeparator()
 
         export_action = QAction("Export session…", self)
@@ -909,6 +916,9 @@ class MainWindow(QMainWindow):
         if dlg.exec_():
             # Invalidate pipeline so next start picks up new whisper model etc.
             self._pipeline = None
+
+    def _show_progress(self):
+        ProgressDialog(ProgressService(self.db), parent=self).exec_()
 
     # ── session management ─────────────────────────────────────────────────────
 

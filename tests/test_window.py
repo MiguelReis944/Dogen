@@ -10,7 +10,9 @@ from nlp.feedback import CoachFeedback
 from pipeline import TurnResult
 from storage.db import Database
 from storage.models import TurnMetrics
+from storage.progress import ProgressStats
 from ui.main_window import MainWindow
+from ui.progress_dialog import ProgressDialog
 from ui.settings_dialog import SettingsDialog
 from utils.config import AppConfig
 
@@ -180,4 +182,40 @@ def test_completed_turn_renders_and_persists_feedback_separately(tmp_path):
         assert "I goed home → I went home" in text
         assert db.feedback_for_session("session") == [result.feedback]
         assert db.recent_messages("session", 2)[1].content == "What did you do there?"
+        window.close()
+
+
+def test_progress_dialog_has_honest_empty_state():
+    app = QApplication.instance() or QApplication([])
+
+    class EmptyProgress:
+        def stats(self, period_days, today):
+            return ProgressStats(period_days, 0, 0, 0.0, 0, 0, None, None, {}, 0)
+
+    dialog = ProgressDialog(EmptyProgress())
+
+    assert dialog.status_label.text() == "Complete your first conversation to see progress"
+    dialog.close()
+
+
+def test_progress_dialog_requires_three_days_for_trend():
+    app = QApplication.instance() or QApplication([])
+
+    class SparseProgress:
+        def stats(self, period_days, today):
+            return ProgressStats(period_days, 2, 2, 20.0, 8, 80, 2.5, 0.25, {}, 3)
+
+    dialog = ProgressDialog(SparseProgress())
+
+    assert dialog.status_label.text() == "More practice days are needed for a trend"
+    dialog.close()
+
+
+def test_main_window_exposes_progress_action(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+
+        assert window.progress_action.objectName() == "progressAction"
+        assert window.progress_action.text() == "Progress…"
         window.close()

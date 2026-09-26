@@ -44,6 +44,18 @@ Correções aparecem em laranja e sugestões em verde na janela de conversa.
 
 Cada dia começa uma sessão nova. Dentro do mesmo dia, retomar o app continua de onde parou — contexto e histórico são restaurados automaticamente. O histórico fica em `conversations.db`, no diretório do projeto.
 
+## Progresso local
+
+Abra **File → Progress…** para consultar os últimos 7 ou 30 dias. As métricas são calculadas localmente:
+
+- um dia de prática é um dia com pelo menos um turno concluído;
+- `fillers / 100 words` = fillers detectados ÷ palavras persistidas × 100;
+- `Transcripts you edited` = transcrições alteradas na revisão ÷ turnos com métricas;
+- tempo de prática é o intervalo entre o primeiro e o último turno de cada sessão;
+- categorias contam apenas correções estruturadas produzidas pelo coach.
+
+Sessões antigas continuam contando como atividade, mas aparecem como **Not enough data** em taxas que ainda não eram armazenadas. O Dogen não mostra nota de pronúncia, fluência ou proficiência porque essas medidas exigem um avaliador fonético validado; atividade e opinião do LLM não são substitutos honestos.
+
 ## Configuração (`settings.json`)
 
 | Chave | Padrão | Descrição |
