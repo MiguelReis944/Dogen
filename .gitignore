@@ -13,3 +13,5 @@ history.json
 conversations.db
 conversations.db-*
 conversations.db.corrupt-*
+local-evaluation/
+*.evaluation.json
