@@ -12,7 +12,13 @@ start.bat
 
 Para setup manual, veja [docs/SETUP.md](docs/SETUP.md).
 
-Clique em **Start Recording** para começar. Dogen encerra o seu turno após ~1,3 s de silêncio e começa a responder imediatamente — a primeira sentença toca enquanto as demais são sintetizadas. **Stop** interrompe a sessão; uma inferência já iniciada pode levar alguns segundos para terminar.
+Clique em **Start Recording** para começar. Dogen começa a responder assim que o turno termina — a primeira sentença toca enquanto as demais são sintetizadas. **Stop** interrompe a sessão; uma inferência já iniciada pode levar alguns segundos para terminar.
+
+## Prática diária
+
+O modo padrão é **Push-to-talk**: segure Espaço ou o botão do microfone enquanto fala e solte para enviar. Ele oferece controle direto e evita que uma pausa natural corte a frase.
+
+O modo **Automatic** encerra o turno depois do intervalo configurado. Em **Settings**, escolha Short (1,2 s), Normal (2,0 s), Long (3,0 s) ou um valor personalizado. Ative **Review transcript before sending** para corrigir o texto reconhecido antes de enviá-lo ao coach; a revisão é enviada automaticamente depois de cinco segundos se não houver edição.
 
 ## Pipeline de um turno
 
@@ -44,7 +50,9 @@ Cada dia começa uma sessão nova. Dentro do mesmo dia, retomar o app continua d
 | `whisper_model` | `small.en` | modelo Whisper (english-only, melhor precisão) |
 | `tts_model` | `tts_models/en/ljspeech/tacotron2-DDC` | voz Coqui TTS |
 | `vad_threshold` | `0.02` | sensibilidade base do detector de voz |
-| `silence_duration_sec` | `1.3` | segundos de silêncio para encerrar o turno |
+| `silence_duration_sec` | `2.0` | segundos de silêncio para encerrar o turno automático |
+| `input_mode` | `ptt` | `ptt` para controle manual ou `vad` para envio automático |
+| `review_transcript` | `false` | permite editar a transcrição antes de enviá-la |
 | `context_size` | `10` | pares de mensagens mantidos em contexto |
 
 Para dispositivos de áudio específicos, rode `python -m sounddevice` para listar os índices e edite `mic_device` / `speaker_device`.

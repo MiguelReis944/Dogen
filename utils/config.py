@@ -20,7 +20,7 @@ class AppConfig:
     vad_threshold: float = 0.02
     silence_duration_sec: float = 2.0
     context_size: int = 10
-    input_mode: str = "vad"  # "vad" | "ptt"
+    input_mode: str = "ptt"  # "vad" | "ptt"
     review_transcript: bool = False  # show editable transcript before sending to LLM
     system_prompt: str = SYSTEM_PROMPT
 

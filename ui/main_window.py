@@ -345,7 +345,7 @@ class MainWindow(QMainWindow):
         top_row = QHBoxLayout()
         top_row.setSpacing(8)
 
-        self.status = QLabel("Ready")
+        self.status = QLabel(self._idle_instruction())
         top_row.addWidget(self.status, stretch=1)
 
         self.stats_label = QLabel("")
@@ -442,9 +442,9 @@ class MainWindow(QMainWindow):
         confirm_btn.setToolTip("Send this transcript to Dogen now")
         confirm_btn.setMinimumWidth(80)
         confirm_btn.clicked.connect(self._on_confirm_transcript)
-        cancel_btn = QPushButton("✕")
-        cancel_btn.setToolTip("Discard this turn — don't send it")
-        cancel_btn.setMinimumWidth(36)
+        cancel_btn = QPushButton("Retry")
+        cancel_btn.setToolTip("Discard this transcript and record the turn again")
+        cancel_btn.setMinimumWidth(70)
         cancel_btn.clicked.connect(self._on_cancel_transcript)
         review_layout.addWidget(QLabel("Heard:"))
         review_layout.addWidget(self._review_edit, stretch=1)
@@ -669,7 +669,7 @@ class MainWindow(QMainWindow):
         self.vol_bar.setVisible(True)
         self.vol_bar.setValue(0)
         self.pet.set_state("listening")
-        label = "Hold Space — recording..." if self.config.input_mode == "ptt" else "Recording..."
+        label = "Release to send" if self.config.input_mode == "ptt" else "Recording..."
         self.status.setText(label)
 
     def _on_recording_finished(self, stop_reason: str, duration_sec: float):
@@ -678,7 +678,7 @@ class MainWindow(QMainWindow):
     def _on_waiting_for_ptt(self):
         self.vol_bar.setVisible(False)
         self.pet.set_state("idle")
-        self.status.setText("Press Space to speak...")
+        self.status.setText("Hold Space or the microphone button to speak")
 
     def _on_volume(self, rms: float):
         self.vol_bar.setValue(min(100, int(rms * _VOL_SCALE)))
@@ -692,7 +692,7 @@ class MainWindow(QMainWindow):
         self.vol_bar.setVisible(False)
         self.pet.set_state("idle")
         if self._last_error is None:
-            self.status.setText("Ready for next turn")
+            self.status.setText(self._idle_instruction())
 
     def _on_transcript_review(self, text: str):
         """Show the editable review bar with a 5-second auto-confirm countdown."""
@@ -703,7 +703,7 @@ class MainWindow(QMainWindow):
         self._review_edit.setFocus()
         self._review_edit.selectAll()
         self._review_timer.start()
-        self.status.setText("Check transcript — sending in 5 s…")
+        self.status.setText("Edit the transcript, then send or retry · sending in 5s")
 
     def _review_tick(self):
         self._review_seconds_left -= 1
@@ -771,7 +771,7 @@ class MainWindow(QMainWindow):
         self.voice_combo.setEnabled(True)
         self.scenario_combo.setEnabled(True)
         if self._last_error is None:
-            self.status.setText("Ready")
+            self.status.setText(self._idle_instruction())
         if self._closing:
             self.close()
 
@@ -783,6 +783,11 @@ class MainWindow(QMainWindow):
         cursor.insertText(text)
         self.history.setTextCursor(cursor)
         self.history.ensureCursorVisible()
+
+    def _idle_instruction(self):
+        if self.config.input_mode == "ptt":
+            return "Hold Space or the microphone button to speak"
+        return "Start speaking; Dogen sends after the selected pause"
 
     # ── settings ───────────────────────────────────────────────────────────────
 

@@ -152,6 +152,23 @@ def test_config_round_trip(tmp_path):
     assert load_config(path).ollama_model == "custom"
 
 
+def test_fresh_config_uses_safe_push_to_talk_defaults():
+    config = AppConfig()
+
+    assert config.input_mode == "ptt"
+    assert config.silence_duration_sec == 2.0
+
+
+def test_existing_turn_settings_are_preserved(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text('{"input_mode": "vad", "silence_duration_sec": 1.3}')
+
+    config = load_config(path)
+
+    assert config.input_mode == "vad"
+    assert config.silence_duration_sec == 1.3
+
+
 def test_external_ollama_host_is_rejected():
     with pytest.raises(ValueError, match="localhost"):
         AppConfig(ollama_host="https://remote.example.com")

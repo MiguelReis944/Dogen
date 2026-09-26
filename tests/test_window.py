@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import QApplication
 from nlp.llm import ConversationContext
 from storage.db import Database
 from ui.main_window import MainWindow
+from ui.settings_dialog import SettingsDialog
 from utils.config import AppConfig
 
 
@@ -105,3 +106,27 @@ def test_recording_finished_shows_capture_diagnostics(tmp_path):
 
         assert window.status.text() == "Captured 6.2s · silence"
         window.close()
+
+
+def test_settings_exposes_stable_turn_control_names(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    dialog = SettingsDialog(AppConfig(), tmp_path / "settings.json")
+
+    assert dialog.findChild(type(dialog._input_mode), "inputModeCombo") is dialog._input_mode
+    assert dialog.findChild(type(dialog._pause_preset), "pausePresetCombo") is dialog._pause_preset
+    assert dialog.findChild(type(dialog._review), "transcriptReviewCheck") is dialog._review
+    dialog.close()
+
+
+def test_pause_presets_persist_exact_seconds(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(silence_duration_sec=1.3)
+    path = tmp_path / "settings.json"
+    dialog = SettingsDialog(config, path)
+
+    assert dialog._pause_preset.currentText() == "Custom"
+    dialog._pause_preset.setCurrentText("Long")
+    dialog._save()
+
+    assert config.silence_duration_sec == 3.0
+    dialog.close()
