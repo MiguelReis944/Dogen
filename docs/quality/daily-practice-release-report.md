@@ -1,6 +1,6 @@
 # Daily Practice Release-Candidate Report
 
-**Date:** 2026-09-26
+**Date:** 2026-09-27
 
 **Status:** implementation complete; human acceptance pending
 
@@ -11,8 +11,7 @@
 - Compute path: CPU PyTorch
 - Microphone: not identified from the supplied recording
 - Whisper default: `small.en`
-- Input default: push-to-talk
-- Automatic pause default: 2.0 seconds
+- Input: click once to start recording and once to finish
 - Noise reduction default: enabled
 - TTS default: `tts_models/en/ljspeech/tacotron2-DDC`
 - LLM default: local Ollama `mistral`
@@ -28,9 +27,9 @@ Executed from the isolated Dogen worktree:
 
 Result:
 
-- 82 tests passed in 6.23 seconds;
+- 88 tests passed in 5.52 seconds;
 - no broken Python requirements;
-- all 25 Python source files compiled in memory without syntax errors;
+- all 35 Python source files compiled in memory without syntax errors;
 - `git diff --check` reported no whitespace errors.
 
 The pytest cache plugin is disabled only in the managed worktree because its sandbox cannot create `.pytest_cache`. It does not change which tests run.
@@ -50,29 +49,27 @@ This is evidence that the original end-to-end loop operated, not a statistically
 
 ## Voice evidence
 
-LJSpeech loaded in 14.785 seconds and synthesized five fixed sentences in 0.611–0.827 seconds each on CPU. The existing SAM model cache could not be benchmarked because the eSpeak backend was unavailable to that process. LJSpeech remains the default because it is the only configured voice validated end to end.
+LJSpeech loaded in 14.785 seconds and synthesized five fixed sentences in 0.611–0.827 seconds each on CPU. LJSpeech is now the only voice exposed by the product.
 
 ## Acceptance status
 
 | Criterion | Status | Evidence |
 |---|---|---|
-| Push-to-talk does not cut 20 test utterances | pending | requires learner microphone protocol |
-| Automatic mode has at most 2 cuts in 20 utterances | pending | requires learner microphone protocol |
+| Click-controlled recording does not cut 20 test utterances | pending | requires learner microphone protocol |
 | Transcript edits improve by at least 30% | pending | evaluator exists; private 120-attempt corpus not recorded |
 | Stop and replay do not add turns | passed automatically | pipeline and UI regression tests |
 | Coaching text is never sent to TTS | passed automatically | clean-speech pipeline tests |
 | Feedback is separate and categorized | passed automatically | parser, database, pipeline, and UI tests |
 | Weekly progress handles empty and legacy data | passed automatically | progress aggregate and UI tests |
 | Ten consecutive manual conversations complete | pending | requires manual use |
-| Automated tests and documentation are current | passed | 82 tests plus README updates |
+| Automated tests and documentation are current | passed | 88 tests plus README and setup updates |
 
 ## Known limitations
 
 - The formal transcription comparison remains pending until the same private recordings are run through all four model/denoise combinations.
 - Practice time is the interval between the first and last completed turn in each session; a one-turn session contributes zero measured minutes.
 - Legacy turns count as activity but cannot produce word, filler, or transcript-edit rates.
-- SAM voice requires a working eSpeak/eSpeak-NG backend.
-- Replay is designed for the default push-to-talk idle state; automatic mode resumes listening immediately.
+- Replay is available from the File menu while click-controlled recording is idle.
 
 ## Deferred work
 
