@@ -18,7 +18,7 @@
 
 3. Inicie o Ollama localmente. Em outra janela, execute `python main.py`.
 
-4. Use **Start recording** para começar a falar e **Finish recording** para enviar o áudio. O Dogen usa o dispositivo padrão de entrada e saída. Para escolher outros dispositivos, edite `mic_device` e `speaker_device` em `settings.json` com os índices retornados por `python -m sounddevice`.
+4. Aguarde o carregamento automático de Whisper, voz e Ollama. Quando **Start recording** for liberado, clique para começar a falar e em **Finish recording** para enviar o áudio. O Dogen usa o dispositivo padrão de entrada e saída. Para escolher outros dispositivos, edite `mic_device` / `speaker_device` em `settings.json` com os índices retornados por `python -m sounddevice`.
 
 Após a preparação, o Dogen usa apenas o Ollama em `localhost:11434` e modelos instalados localmente. Se Whisper não estiver em cache, o aplicativo mostra uma mensagem com este guia. O Coqui também precisa estar em cache antes do uso offline.
 

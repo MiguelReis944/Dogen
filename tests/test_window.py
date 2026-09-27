@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QApplication, QPushButton
 
 from nlp.llm import ConversationContext
@@ -22,7 +23,31 @@ def _make_window(db, cfg=None, session="session"):
     if cfg is None:
         cfg = AppConfig()
     with patch.object(MainWindow, "_fetch_models", return_value=None):
-        return MainWindow(cfg, db, ConversationContext(), session)
+        return MainWindow(
+            cfg, db, ConversationContext(), session,
+            auto_start=False, start_maximized=False,
+        )
+
+
+def test_window_opens_maximized_and_schedules_engine_without_recording(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        with (
+            patch.object(MainWindow, "_fetch_models", return_value=None),
+            patch.object(MainWindow, "start", return_value=None) as start,
+        ):
+            window = MainWindow(
+                AppConfig(), db, ConversationContext(), "session",
+                auto_start=True, start_maximized=True,
+            )
+            app.processEvents()
+
+        assert start.call_count == 1
+        assert window.windowState() & Qt.WindowMaximized
+        assert window.record_button.text() == "Loading…"
+        assert not window.record_button.isEnabled()
+        assert window.worker is None
+        window.close()
 
 
 def test_window_keeps_dogen_name_and_single_record_control(tmp_path):
@@ -61,6 +86,7 @@ def test_record_button_clicks_start_and_finish_capture(tmp_path):
         worker = RunningWorker()
         window.worker = worker
         window._on_waiting_for_ptt()
+        assert worker.started == 0
 
         window.record_button.click()
         assert worker.started == 1
@@ -183,6 +209,8 @@ def test_worker_failure_remains_visible_after_finish(tmp_path):
         window._on_error("Coqui model is not cached")
         window._on_finished()
         assert window.status.text() == "Coqui model is not cached"
+        assert window.record_button.text() == "Unavailable"
+        assert not window.record_button.isEnabled()
         window.close()
 
 

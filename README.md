@@ -12,7 +12,7 @@ start.bat
 
 Para setup manual, veja [docs/SETUP.md](docs/SETUP.md).
 
-Clique em **Start recording** para começar a falar e em **Finish recording** para enviar. Dogen começa a responder assim que o turno termina — a primeira sentença toca enquanto as demais são sintetizadas.
+Ao abrir, Dogen maximiza a janela e carrega automaticamente Whisper, a voz local e o modelo do Ollama. As etapas aparecem na região do medidor; a gravação não começa sozinha. Quando **Start recording** for liberado, clique para começar a falar e depois em **Finish recording** para enviar.
 
 ## Prática diária
 

@@ -11,6 +11,7 @@
 - Compute path: CPU PyTorch
 - Microphone: not identified from the supplied recording
 - Whisper default: `small.en`
+- Startup: speech recognition, voice, and Ollama model load automatically
 - Input: click once to start recording and once to finish
 - Noise reduction default: enabled
 - TTS default: `tts_models/en/ljspeech/tacotron2-DDC`

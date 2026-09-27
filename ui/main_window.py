@@ -12,7 +12,7 @@ from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt5.QtGui import QKeySequence, QTextCursor
 from PyQt5.QtWidgets import (QAction, QComboBox, QFileDialog, QGroupBox,
                               QHBoxLayout, QLabel, QLineEdit, QMainWindow,
-                              QProgressBar, QPushButton, QSplitter,
+                              QProgressBar, QPushButton, QSizePolicy, QSplitter,
                               QStackedWidget, QTextEdit, QVBoxLayout, QWidget)
 
 from audio.player import Player
@@ -195,10 +195,11 @@ class ConversationWorker(QThread):
                 pipeline = self._prebuilt_pipeline
                 pipeline.llm.model = self.model
             else:
-                self.status_message.emit("Loading local speech models...")
+                self.status_message.emit("Loading speech recognition…")
                 transcriber = Transcriber(self.config.whisper_model)
                 if self._cancelled():
                     return
+                self.status_message.emit("Loading voice…")
                 try:
                     synthesizer = Synthesizer(self.config.tts_model)
                     synthesizer._speaker = self.config.tts_speaker
@@ -340,7 +341,8 @@ class ReplayWorker(QThread):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, config, db, context, session_id, settings_path=None):
+    def __init__(self, config, db, context, session_id, settings_path=None,
+                 auto_start=True, start_maximized=True):
         super().__init__()
         self.setWindowTitle("Dogen")
         self.resize(780, 640)
@@ -394,6 +396,7 @@ class MainWindow(QMainWindow):
         self.status = QLabel(self._idle_instruction())
         self.status.setObjectName("statusText")
         self.status.setWordWrap(True)
+        self.status.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
 
         self.stats_label = QLabel("")
         self.stats_label.setObjectName("sessionStats")
@@ -463,6 +466,7 @@ class MainWindow(QMainWindow):
         self.loading_status = QLabel("Start a conversation when you're ready")
         self.loading_status.setObjectName("loadingStatus")
         self.loading_status.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        self.loading_status.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.vol_bar = QProgressBar()
         self.vol_bar.setObjectName("voiceLevel")
         self.vol_bar.setRange(0, 100)
@@ -506,6 +510,14 @@ class MainWindow(QMainWindow):
                             padding: 8px 16px; font-weight: 600; }
             #recordButton:disabled { background: #263747; color: #91A4B7; }
         """)
+        if start_maximized:
+            self.setWindowState(self.windowState() | Qt.WindowMaximized)
+        if auto_start:
+            self._capture_state = "loading"
+            self.loading_status.setText("Starting local models…")
+            self.record_button.setText("Loading…")
+            self.record_button.setEnabled(False)
+            QTimer.singleShot(0, self.start)
 
     # ── menu ───────────────────────────────────────────────────────────────────
 
@@ -920,8 +932,12 @@ class MainWindow(QMainWindow):
         self._capture_state = "idle"
         self.capture_stack.setCurrentWidget(self.loading_status)
         self.pet.set_state("idle")
-        self.record_button.setEnabled(True)
-        self.record_button.setText("Start recording")
+        if self._last_error is None:
+            self.record_button.setEnabled(True)
+            self.record_button.setText("Start recording")
+        else:
+            self.record_button.setEnabled(False)
+            self.record_button.setText("Unavailable")
         self._set_configuration_enabled(True)
         self.stop_audio_button.setEnabled(False)
         self.replay_response_button.setEnabled(bool(self._last_assistant_text and self._pipeline))
