@@ -11,7 +11,7 @@ from pipeline import TurnResult
 from storage.db import Database
 from storage.models import TurnMetrics
 from storage.progress import ProgressStats
-from ui.main_window import MainWindow
+from ui.main_window import ConversationWorker, MainWindow
 from ui.progress_dialog import ProgressDialog
 from ui.settings_dialog import SettingsDialog
 from utils.config import AppConfig
@@ -72,6 +72,19 @@ def test_record_button_clicks_start_and_finish_capture(tmp_path):
         window.close()
 
 
+def test_ptt_wait_clears_old_events_before_announcing_ready():
+    app = QApplication.instance() or QApplication([])
+    worker = ConversationWorker(AppConfig(), ConversationContext(), "mistral")
+    worker._ptt_start_event.set()
+    worker._ptt_stop_event.set()
+    worker.waiting_for_ptt.connect(worker.begin_ptt)
+
+    worker._prepare_ptt_wait()
+
+    assert worker._ptt_start_event.is_set()
+    assert not worker._ptt_stop_event.is_set()
+
+
 def test_loading_message_uses_meter_region_until_worker_is_ready(tmp_path):
     app = QApplication.instance() or QApplication([])
     with Database(tmp_path / "conversation.db") as db:
@@ -117,6 +130,27 @@ def test_file_menu_owns_model_and_scenario_selection(tmp_path):
 
         assert window.model_combo.currentText() == "llama3"
         assert window.scenario_combo.currentText() == "Job interview"
+        window.close()
+
+
+def test_configuration_actions_are_locked_while_worker_runs(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+
+        with patch.object(ConversationWorker, "start", return_value=None):
+            window.start()
+
+        assert not window.flow_action.isEnabled()
+        assert not window.model_menu.isEnabled()
+        assert not window.scenario_menu.isEnabled()
+        assert not window.settings_action.isEnabled()
+
+        window._on_finished()
+        assert window.flow_action.isEnabled()
+        assert window.model_menu.isEnabled()
+        assert window.scenario_menu.isEnabled()
+        assert window.settings_action.isEnabled()
         window.close()
 
 

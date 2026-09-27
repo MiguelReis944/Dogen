@@ -106,6 +106,11 @@ class ConversationWorker(QThread):
     def end_ptt(self):
         self._ptt_stop_event.set()
 
+    def _prepare_ptt_wait(self):
+        self._ptt_start_event.clear()
+        self._ptt_stop_event.clear()
+        self.waiting_for_ptt.emit()
+
     def confirm_transcript(self, text: str):
         self._confirmed_text = text
         self._confirm_event.set()
@@ -198,14 +203,7 @@ class ConversationWorker(QThread):
                     synthesizer = Synthesizer(self.config.tts_model)
                     synthesizer._speaker = self.config.tts_speaker
                 except FileNotFoundError as exc:
-                    msg = str(exc)
-                    if "espeak" in msg.lower():
-                        self.error.emit(
-                            "Male voice needs eSpeak-NG. Install from https://espeak-ng.org/ "
-                            "then restart Dogen. Or switch back to ♀ Female."
-                        )
-                    else:
-                        self.error.emit(msg)
+                    self.error.emit(str(exc))
                     return
                 if self._cancelled():
                     return
@@ -250,9 +248,7 @@ class ConversationWorker(QThread):
             while not self._cancelled():
                 # PTT mode: wait for the key press before starting the recorder
                 if is_ptt:
-                    self.waiting_for_ptt.emit()
-                    self._ptt_start_event.clear()
-                    self._ptt_stop_event.clear()
+                    self._prepare_ptt_wait()
                     while not self._cancelled() and not self._ptt_start_event.wait(timeout=0.1):
                         pass
                     if self._cancelled():
@@ -563,10 +559,10 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
-        settings_action = QAction("Settings…", self)
-        settings_action.setShortcut(QKeySequence("Ctrl+,"))
-        settings_action.triggered.connect(self._open_settings)
-        file_menu.addAction(settings_action)
+        self.settings_action = QAction("Settings…", self)
+        self.settings_action.setShortcut(QKeySequence("Ctrl+,"))
+        self.settings_action.triggered.connect(self._open_settings)
+        file_menu.addAction(self.settings_action)
 
         export_action = QAction("Export session…", self)
         export_action.setShortcut(QKeySequence("Ctrl+E"))
@@ -742,6 +738,14 @@ class MainWindow(QMainWindow):
 
     # ── start / stop ───────────────────────────────────────────────────────────
 
+    def _set_configuration_enabled(self, enabled: bool):
+        self.model_combo.setEnabled(enabled)
+        self.scenario_combo.setEnabled(enabled)
+        self.model_menu.setEnabled(enabled)
+        self.scenario_menu.setEnabled(enabled)
+        self.flow_action.setEnabled(enabled)
+        self.settings_action.setEnabled(enabled)
+
     def _set_status(self, text: str):
         self.status.setText(text)
         if self._capture_state in {"idle", "loading"}:
@@ -751,8 +755,7 @@ class MainWindow(QMainWindow):
     def start(self):
         if self.worker and self.worker.isRunning():
             return
-        self.model_combo.setEnabled(False)
-        self.scenario_combo.setEnabled(False)
+        self._set_configuration_enabled(False)
         self.replay_response_button.setEnabled(False)
         self.worker = ConversationWorker(
             self.config, self.context, self._selected_model(), self._pipeline, self
@@ -919,8 +922,7 @@ class MainWindow(QMainWindow):
         self.pet.set_state("idle")
         self.record_button.setEnabled(True)
         self.record_button.setText("Start recording")
-        self.model_combo.setEnabled(True)
-        self.scenario_combo.setEnabled(True)
+        self._set_configuration_enabled(True)
         self.stop_audio_button.setEnabled(False)
         self.replay_response_button.setEnabled(bool(self._last_assistant_text and self._pipeline))
         if self._last_error is None:

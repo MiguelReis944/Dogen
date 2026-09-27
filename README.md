@@ -20,7 +20,7 @@ O modo de gravação é controlado por cliques: um clique começa e outro termin
 
 A conversa ocupa o painel principal. **Fixes** mostra correções e frases alternativas sem poluir o diálogo, e **Status** mostra o estágio atual. Ações secundárias, seleção de cenário e seleção de modelo ficam no menu **File**. A narração usa somente a voz feminina local.
 
-O modo **Automatic** encerra o turno depois do intervalo configurado. Em **Settings**, escolha Short (1,2 s), Normal (2,0 s), Long (3,0 s) ou um valor personalizado. Ative **Review transcript before sending** para corrigir o texto reconhecido antes de enviá-lo ao coach; a revisão é enviada automaticamente depois de cinco segundos se não houver edição.
+Em **Settings**, ative **Review transcript before sending** para corrigir o texto reconhecido antes de enviá-lo ao coach; a revisão é enviada automaticamente depois de cinco segundos se não houver edição.
 
 Depois de uma resposta completa, use **Replay response** para ouvi-la novamente ou **Stop audio** para interromper a fala. Repetir uma resposta não cria outro turno, não chama o Ollama e não altera as estatísticas.
 
@@ -40,7 +40,7 @@ O Dogen responde em inglês e, quando detecta erros, acrescenta ao final:
 [Better phrasing: "I had class yesterday" sounds more natural]
 ```
 
-Correções aparecem em laranja e sugestões em verde na janela de conversa.
+Correções e sugestões aparecem separadamente no painel **Fixes**.
 
 ## Sessões
 
@@ -64,10 +64,10 @@ Sessões antigas continuam contando como atividade, mas aparecem como **Not enou
 |---|---|---|
 | `ollama_model` | `mistral` | modelo LLM no Ollama |
 | `whisper_model` | `small.en` | modelo Whisper (english-only, melhor precisão) |
-| `tts_model` | `tts_models/en/ljspeech/tacotron2-DDC` | voz Coqui TTS |
+| `tts_model` | `tts_models/en/ljspeech/tacotron2-DDC` | voz feminina fixa do Coqui TTS |
 | `vad_threshold` | `0.02` | sensibilidade base do detector de voz |
-| `silence_duration_sec` | `2.0` | segundos de silêncio para encerrar o turno automático |
-| `input_mode` | `ptt` | `ptt` para controle manual ou `vad` para envio automático |
+| `silence_duration_sec` | `2.0` | valor legado preservado para compatibilidade de configuração |
+| `input_mode` | `ptt` | valor legado; a interface usa gravação manual por cliques |
 | `review_transcript` | `false` | permite editar a transcrição antes de enviá-la |
 | `noise_reduction` | `true` | aplica redução de ruído depois da captura; pode ser desligada para comparar clareza |
 | `context_size` | `10` | pares de mensagens mantidos em contexto |
@@ -82,8 +82,6 @@ python scripts/evaluate_transcription.py --manifest local-evaluation/manifest.js
 ```
 
 Os áudios e relatórios `*.evaluation.json` são ignorados pelo Git.
-
-**Voz mais natural:** troque `tts_model` por `tts_models/multilingual/multi-dataset/xtts_v2` e execute `python -c "from TTS.api import TTS; TTS('tts_models/multilingual/multi-dataset/xtts_v2')"` para baixar o modelo.
 
 ## Estrutura
 
