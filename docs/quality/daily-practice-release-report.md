@@ -28,7 +28,7 @@ Executed from the isolated Dogen worktree:
 
 Result:
 
-- 88 tests passed in 5.52 seconds;
+- 91 tests passed in 9.12 seconds;
 - no broken Python requirements;
 - all 35 Python source files compiled in memory without syntax errors;
 - `git diff --check` reported no whitespace errors.
@@ -63,7 +63,7 @@ LJSpeech loaded in 14.785 seconds and synthesized five fixed sentences in 0.611â
 | Feedback is separate and categorized | passed automatically | parser, database, pipeline, and UI tests |
 | Weekly progress handles empty and legacy data | passed automatically | progress aggregate and UI tests |
 | Ten consecutive manual conversations complete | pending | requires manual use |
-| Automated tests and documentation are current | passed | 88 tests plus README and setup updates |
+| Automated tests and documentation are current | passed | 91 tests plus README and setup updates |
 
 ## Known limitations
 

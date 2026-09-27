@@ -187,6 +187,29 @@ class ConversationWorker(QThread):
             except ValueError:
                 pass
 
+    def _warm_up_llm(self, pipeline) -> bool:
+        while not self._cancelled():
+            try:
+                pipeline.llm.client.list()
+                break
+            except Exception:
+                self.status_message.emit("Waiting for Ollama on localhost:11434...")
+                for _ in range(50):
+                    if self._cancelled():
+                        return False
+                    self.msleep(100)
+        if self._cancelled():
+            return False
+        self.status_message.emit(f"Loading {pipeline.llm.model} into RAM...")
+        try:
+            pipeline.llm.client.generate(
+                model=pipeline.llm.model, prompt="", options={"num_predict": 0}
+            )
+        except Exception as exc:
+            self.error.emit(f"Could not load {pipeline.llm.model}: {exc}")
+            return False
+        return True
+
     # ── main loop ──────────────────────────────────────────────────────────────
 
     def run(self):
@@ -223,26 +246,9 @@ class ConversationWorker(QThread):
                 self.config.noise_reduction,
             )
 
-            # Warmup: wait for Ollama and pre-load the model into RAM
-            while not self._cancelled():
-                try:
-                    pipeline.llm.client.list()
-                    break
-                except Exception:
-                    self.status_message.emit("Waiting for Ollama on localhost:11434...")
-                    for _ in range(50):
-                        if self._cancelled():
-                            return
-                        self.msleep(100)
-            if self._cancelled():
+            # Warmup: wait for Ollama and pre-load the model into RAM.
+            if not self._warm_up_llm(pipeline):
                 return
-            self.status_message.emit(f"Loading {pipeline.llm.model} into RAM...")
-            try:
-                pipeline.llm.client.generate(
-                    model=pipeline.llm.model, prompt="", options={"num_predict": 0}
-                )
-            except Exception:
-                pass
 
             is_ptt = self.config.input_mode == "ptt"
 
@@ -357,6 +363,7 @@ class MainWindow(QMainWindow):
         self._last_assistant_text = ""
         self._assistant_open = False
         self._closing = False
+        self._startup_timer = None
         self._last_error = None
         self._corrections_on = True
         self._capture_state = "idle"
@@ -517,7 +524,10 @@ class MainWindow(QMainWindow):
             self.loading_status.setText("Starting local models…")
             self.record_button.setText("Loading…")
             self.record_button.setEnabled(False)
-            QTimer.singleShot(0, self.start)
+            self._startup_timer = QTimer(self)
+            self._startup_timer.setSingleShot(True)
+            self._startup_timer.timeout.connect(self.start)
+            self._startup_timer.start(0)
 
     # ── menu ───────────────────────────────────────────────────────────────────
 
@@ -1060,6 +1070,8 @@ class MainWindow(QMainWindow):
     # ── close ──────────────────────────────────────────────────────────────────
 
     def closeEvent(self, event):
+        if self._startup_timer and self._startup_timer.isActive():
+            self._startup_timer.stop()
         if self.worker and self.worker.isRunning():
             self._closing = True
             self.stop()

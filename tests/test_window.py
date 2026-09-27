@@ -1,4 +1,5 @@
 import os
+from types import SimpleNamespace
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -48,6 +49,44 @@ def test_window_opens_maximized_and_schedules_engine_without_recording(tmp_path)
         assert not window.record_button.isEnabled()
         assert window.worker is None
         window.close()
+
+
+def test_closing_before_first_event_cancels_automatic_start(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        with (
+            patch.object(MainWindow, "_fetch_models", return_value=None),
+            patch.object(MainWindow, "start", return_value=None) as start,
+        ):
+            window = MainWindow(
+                AppConfig(), db, ConversationContext(), "session",
+                auto_start=True, start_maximized=False,
+            )
+            window.close()
+            app.processEvents()
+
+        assert start.call_count == 0
+
+
+def test_ollama_warmup_failure_keeps_worker_unavailable():
+    app = QApplication.instance() or QApplication([])
+
+    class BrokenWarmupClient:
+        def list(self):
+            return []
+
+        def generate(self, **kwargs):
+            raise RuntimeError("model is missing")
+
+    pipeline = SimpleNamespace(
+        llm=SimpleNamespace(client=BrokenWarmupClient(), model="missing")
+    )
+    worker = ConversationWorker(AppConfig(), ConversationContext(), "missing")
+    errors = []
+    worker.error.connect(errors.append)
+
+    assert not worker._warm_up_llm(pipeline)
+    assert errors == ["Could not load missing: model is missing"]
 
 
 def test_window_keeps_dogen_name_and_single_record_control(tmp_path):
