@@ -1,4 +1,8 @@
-* { font-family: "Cascadia Mono", "Consolas", "Courier New", monospace; }
+* { font-family: "Segoe UI", sans-serif; }
+
+#statusText, #loadingStatus, #sessionStats {
+    font-family: "Cascadia Mono", "Consolas", "Courier New", monospace;
+}
 
 QWidget { background: #0a0e14; color: #d7ffe4; font-size: 13px; }
 QMainWindow { background: #0a0e14; }

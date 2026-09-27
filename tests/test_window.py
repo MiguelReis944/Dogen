@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt5.QtWidgets import QApplication
+from PyQt5.QtWidgets import QApplication, QPushButton
 
 from nlp.llm import ConversationContext
 from nlp.feedback import CoachFeedback
@@ -25,13 +25,109 @@ def _make_window(db, cfg=None, session="session"):
         return MainWindow(cfg, db, ConversationContext(), session)
 
 
-def test_window_keeps_dogen_name_and_start_control(tmp_path):
+def test_window_keeps_dogen_name_and_single_record_control(tmp_path):
     app = QApplication.instance() or QApplication([])
     with Database(tmp_path / "conversation.db") as db:
         window = _make_window(db)
         assert window.windowTitle() == "Dogen"
-        assert window.start_button.text() == "Start Recording"
-        assert not window.stop_button.isEnabled()
+        assert window.record_button.text() == "Start recording"
+        visible_controls = [
+            button for button in window.centralWidget().findChildren(QPushButton)
+            if not window._review_bar.isAncestorOf(button)
+        ]
+        assert visible_controls == [window.record_button]
+        window.close()
+
+
+def test_record_button_clicks_start_and_finish_capture(tmp_path):
+    app = QApplication.instance() or QApplication([])
+
+    class RunningWorker:
+        def __init__(self):
+            self.started = 0
+            self.ended = 0
+
+        def isRunning(self):
+            return True
+
+        def begin_ptt(self):
+            self.started += 1
+
+        def end_ptt(self):
+            self.ended += 1
+
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        worker = RunningWorker()
+        window.worker = worker
+        window._on_waiting_for_ptt()
+
+        window.record_button.click()
+        assert worker.started == 1
+
+        window._on_recording_started()
+        assert window.record_button.text() == "Finish recording"
+        window.record_button.click()
+        assert worker.ended == 1
+        window.close()
+
+
+def test_loading_message_uses_meter_region_until_worker_is_ready(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+
+        window._set_status("Loading local speech models...")
+        assert window.capture_stack.currentWidget() is window.loading_status
+        assert window.loading_status.text() == "Loading local speech models..."
+
+        window._on_waiting_for_ptt()
+        assert window.capture_stack.currentWidget() is window.vol_bar
+        window.close()
+
+
+def test_file_menu_owns_secondary_actions(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        file_menu = window.menuBar().actions()[0].menu()
+        labels = {action.text() for action in file_menu.actions()}
+
+        assert {
+            "New session", "Vocabulary…", "Progress…", "Replay response",
+            "Stop audio", "Settings…", "Export session…", "Exit",
+        } <= labels
+        window.close()
+
+
+def test_file_menu_owns_model_and_scenario_selection(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        window._on_models_ready(["llama3", "mistral"])
+        file_menu = window.menuBar().actions()[0].menu()
+        menus = {action.text(): action.menu() for action in file_menu.actions() if action.menu()}
+
+        assert {"Model", "Scenario"} <= menus.keys()
+        next(action for action in menus["Model"].actions() if action.text() == "llama3").trigger()
+        next(
+            action for action in menus["Scenario"].actions()
+            if action.text() == "Job interview"
+        ).trigger()
+
+        assert window.model_combo.currentText() == "llama3"
+        assert window.scenario_combo.currentText() == "Job interview"
+        window.close()
+
+
+def test_only_female_voice_is_available(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        cfg = AppConfig(tts_model="tts_models/en/sam/tacotron-DDC")
+        window = _make_window(db, cfg)
+
+        assert cfg.tts_model == "tts_models/en/ljspeech/tacotron2-DDC"
+        assert not hasattr(window, "voice_combo")
         window.close()
 
 
@@ -113,27 +209,15 @@ def test_recording_finished_shows_capture_diagnostics(tmp_path):
         window.close()
 
 
-def test_settings_exposes_stable_turn_control_names(tmp_path):
+def test_settings_persists_click_controlled_recording(tmp_path):
     app = QApplication.instance() or QApplication([])
-    dialog = SettingsDialog(AppConfig(), tmp_path / "settings.json")
+    config = AppConfig(input_mode="vad", silence_duration_sec=1.3)
+    dialog = SettingsDialog(config, tmp_path / "settings.json")
 
-    assert dialog.findChild(type(dialog._input_mode), "inputModeCombo") is dialog._input_mode
-    assert dialog.findChild(type(dialog._pause_preset), "pausePresetCombo") is dialog._pause_preset
     assert dialog.findChild(type(dialog._review), "transcriptReviewCheck") is dialog._review
-    dialog.close()
-
-
-def test_pause_presets_persist_exact_seconds(tmp_path):
-    app = QApplication.instance() or QApplication([])
-    config = AppConfig(silence_duration_sec=1.3)
-    path = tmp_path / "settings.json"
-    dialog = SettingsDialog(config, path)
-
-    assert dialog._pause_preset.currentText() == "Custom"
-    dialog._pause_preset.setCurrentText("Long")
     dialog._save()
 
-    assert config.silence_duration_sec == 3.0
+    assert config.input_mode == "ptt"
     dialog.close()
 
 
@@ -176,10 +260,14 @@ def test_completed_turn_renders_and_persists_feedback_separately(tmp_path):
 
         window._on_completed(result, 100)
 
-        text = window.history.toPlainText()
-        assert "What did you do there?" in text
-        assert "Coach feedback" in text
-        assert "I goed home → I went home" in text
+        conversation = window.history.toPlainText()
+        fixes = window.fixes.toPlainText()
+        assert "What did you do there?" in conversation
+        assert "Coach feedback" not in conversation
+        assert "I goed home → I went home" not in conversation
+        assert "I goed home → I went home" in fixes
+        assert window.fixes_group.title() == "Fixes"
+        assert window.status_group.title() == "Status"
         assert db.feedback_for_session("session") == [result.feedback]
         assert db.recent_messages("session", 2)[1].content == "What did you do there?"
         window.close()

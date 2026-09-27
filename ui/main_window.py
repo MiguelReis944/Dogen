@@ -10,10 +10,10 @@ import uuid
 import numpy as np
 from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt5.QtGui import QKeySequence, QTextCursor
-from PyQt5.QtWidgets import (QAction, QComboBox, QFileDialog, QHBoxLayout,
-                              QLabel, QLineEdit, QMainWindow, QMenuBar,
-                              QProgressBar, QPushButton, QTextEdit,
-                              QVBoxLayout, QWidget)
+from PyQt5.QtWidgets import (QAction, QComboBox, QFileDialog, QGroupBox,
+                              QHBoxLayout, QLabel, QLineEdit, QMainWindow,
+                              QProgressBar, QPushButton, QSplitter,
+                              QStackedWidget, QTextEdit, QVBoxLayout, QWidget)
 
 from audio.player import Player
 from audio.recorder import Recorder
@@ -31,12 +31,7 @@ from ui.session_summary_dialog import SessionSummaryDialog
 from ui.settings_dialog import SettingsDialog
 from ui.vocab_dialog import VocabDialog
 
-# Maps voice selector label → Coqui model name.
-# Female uses gruut (no system deps). Male uses espeak-ng (needs separate install).
-VOICE_MODELS = {
-    "♀ Female": "tts_models/en/ljspeech/tacotron2-DDC",
-    "♂ Male":   "tts_models/en/sam/tacotron-DDC",
-}
+FEMALE_VOICE_MODEL = "tts_models/en/ljspeech/tacotron2-DDC"
 
 _CORRECTION_RE = re.compile(r'(\[[A-Z][^:\[\]\n]*:.*?\])', re.DOTALL)
 
@@ -366,113 +361,78 @@ class MainWindow(QMainWindow):
         self._closing = False
         self._last_error = None
         self._corrections_on = True
+        self._capture_state = "idle"
+        self._record_when_ready = False
+
+        # The focused conversation experience has one supported input and voice.
+        self.config.input_mode = "ptt"
+        self.config.tts_model = FEMALE_VOICE_MODEL
+
+        # These selectors remain as non-visual state holders for the File menu.
+        self.model_combo = QComboBox(self)
+        if config.ollama_model:
+            self.model_combo.addItem(config.ollama_model)
+        self.model_combo.setEnabled(False)
+        self.model_combo.currentTextChanged.connect(self._on_model_changed)
+        self.model_combo.hide()
+
+        self.scenario_combo = QComboBox(self)
+        self.scenario_combo.addItems(list(SCENARIOS.keys()))
+        self.scenario_combo.currentTextChanged.connect(self._on_scenario_changed)
+        self.scenario_combo.hide()
 
         self._build_menu()
 
         body = QWidget()
         layout = QVBoxLayout(body)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(6)
+        layout.setContentsMargins(10, 8, 10, 10)
+        layout.setSpacing(8)
 
         # ── pet body ───────────────────────────────────────────────────────────
         self.pet = PetWidget()
         self.pet.setMaximumHeight(170)
         layout.addWidget(self.pet)
 
-        # ── top row ────────────────────────────────────────────────────────────
-        top_row = QHBoxLayout()
-        top_row.setSpacing(8)
-
+        # ── conversation + side information ───────────────────────────────────
+        content = QSplitter(Qt.Horizontal)
         self.status = QLabel(self._idle_instruction())
-        top_row.addWidget(self.status, stretch=1)
+        self.status.setObjectName("statusText")
+        self.status.setWordWrap(True)
 
         self.stats_label = QLabel("")
-        self.stats_label.setStyleSheet("color: #888; font-size: 12px;")
-        top_row.addWidget(self.stats_label)
+        self.stats_label.setObjectName("sessionStats")
 
-        self.flow_btn = QPushButton("Mode: Coaching")
-        self.flow_btn.setCheckable(True)
-        self.flow_btn.setToolTip(
-            "Coaching: Dogen points out grammar mistakes.\n"
-            "Fluency: pure conversation, no corrections.\n"
-            "Click to switch."
-        )
-        self.flow_btn.setMinimumWidth(140)
-        self.flow_btn.toggled.connect(self._on_flow_toggled)
-        top_row.addWidget(self.flow_btn)
-
-        top_row.addWidget(QLabel("Voice:"))
-        self.voice_combo = QComboBox()
-        self.voice_combo.addItems(list(VOICE_MODELS.keys()))
-        self.voice_combo.setMinimumWidth(110)
-        self.voice_combo.currentTextChanged.connect(self._on_voice_changed)
-        top_row.addWidget(self.voice_combo)
-
-        top_row.addWidget(QLabel("Model:"))
-        self.model_combo = QComboBox()
-        self.model_combo.setMinimumWidth(180)
-        if config.ollama_model:
-            self.model_combo.addItem(config.ollama_model)
-        self.model_combo.setEnabled(False)
-        self.model_combo.currentTextChanged.connect(self._on_model_changed)
-        top_row.addWidget(self.model_combo)
-
-        layout.addLayout(top_row)
-
-        # ── volume bar ─────────────────────────────────────────────────────────
-        self.vol_bar = QProgressBar()
-        self.vol_bar.setRange(0, 100)
-        self.vol_bar.setTextVisible(False)
-        self.vol_bar.setMaximumHeight(5)
-        self.vol_bar.setVisible(False)
-        self.vol_bar.setStyleSheet(
-            "QProgressBar { border: none; background: #222; border-radius: 2px; }"
-            "QProgressBar::chunk { background: #4ade80; border-radius: 2px; }"
-        )
-        layout.addWidget(self.vol_bar)
-
-        # ── history ────────────────────────────────────────────────────────────
         self.history = QTextEdit()
+        self.history.setObjectName("conversationHistory")
         self.history.setReadOnly(True)
-        layout.addWidget(self.history)
+        self.history.setPlaceholderText("Your conversation will appear here.")
+        content.addWidget(self.history)
 
-        # ── bottom row ─────────────────────────────────────────────────────────
-        bottom_row = QHBoxLayout()
-        bottom_row.setSpacing(8)
+        side = QWidget()
+        side_layout = QVBoxLayout(side)
+        side_layout.setContentsMargins(0, 0, 0, 0)
+        side_layout.setSpacing(8)
 
-        bottom_row.addWidget(QLabel("Scenario:"))
-        self.scenario_combo = QComboBox()
-        self.scenario_combo.addItems(list(SCENARIOS.keys()))
-        self.scenario_combo.setMinimumWidth(180)
-        self.scenario_combo.currentTextChanged.connect(self._on_scenario_changed)
-        bottom_row.addWidget(self.scenario_combo, stretch=1)
+        self.fixes_group = QGroupBox("Fixes")
+        fixes_layout = QVBoxLayout(self.fixes_group)
+        self.fixes = QTextEdit()
+        self.fixes.setObjectName("fixesPanel")
+        self.fixes.setReadOnly(True)
+        self.fixes.setPlaceholderText("Corrections and better phrasing will appear here.")
+        fixes_layout.addWidget(self.fixes)
+        side_layout.addWidget(self.fixes_group, stretch=3)
 
-        vocab_btn = QPushButton("Vocabulary")
-        vocab_btn.setToolTip("Show corrections collected during practice")
-        vocab_btn.setMinimumWidth(90)
-        vocab_btn.clicked.connect(self._show_vocab)
-        bottom_row.addWidget(vocab_btn)
-
-        new_session_btn = QPushButton("New Session")
-        new_session_btn.setToolTip("Save a summary of this session and start a fresh, empty chat")
-        new_session_btn.setMinimumWidth(120)
-        new_session_btn.clicked.connect(self._end_session)
-        bottom_row.addWidget(new_session_btn)
-
-        self.start_button = QPushButton("Start Recording")
-        self.stop_button = QPushButton("Stop")
-        self.stop_button.setEnabled(False)
-        self.replay_response_button = QPushButton("Replay response")
-        self.replay_response_button.setObjectName("replayResponseButton")
-        self.replay_response_button.setEnabled(False)
-        self.stop_audio_button = QPushButton("Stop audio")
-        self.stop_audio_button.setObjectName("stopAudioButton")
-        self.stop_audio_button.setEnabled(False)
-        bottom_row.addWidget(self.start_button)
-        bottom_row.addWidget(self.replay_response_button)
-        bottom_row.addWidget(self.stop_audio_button)
-        bottom_row.addWidget(self.stop_button)
-        layout.addLayout(bottom_row)
+        self.status_group = QGroupBox("Status")
+        status_layout = QVBoxLayout(self.status_group)
+        status_layout.addWidget(self.status)
+        status_layout.addStretch(1)
+        status_layout.addWidget(self.stats_label)
+        side_layout.addWidget(self.status_group, stretch=2)
+        content.addWidget(side)
+        content.setStretchFactor(0, 7)
+        content.setStretchFactor(1, 3)
+        content.setSizes([680, 300])
+        layout.addWidget(content, stretch=1)
 
         # ── transcript review bar (hidden until review_transcript is on) ───────
         self._review_bar = QWidget()
@@ -500,21 +460,56 @@ class MainWindow(QMainWindow):
         self._review_bar.setVisible(False)
         layout.addWidget(self._review_bar)
 
+        # ── capture controls ───────────────────────────────────────────────────
+        capture_row = QHBoxLayout()
+        capture_row.setSpacing(10)
+        self.capture_stack = QStackedWidget()
+        self.loading_status = QLabel("Start a conversation when you're ready")
+        self.loading_status.setObjectName("loadingStatus")
+        self.loading_status.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+        self.vol_bar = QProgressBar()
+        self.vol_bar.setObjectName("voiceLevel")
+        self.vol_bar.setRange(0, 100)
+        self.vol_bar.setTextVisible(False)
+        self.capture_stack.addWidget(self.loading_status)
+        self.capture_stack.addWidget(self.vol_bar)
+        self.capture_stack.setCurrentWidget(self.loading_status)
+        capture_row.addWidget(self.capture_stack, stretch=1)
+
+        self.record_button = QPushButton("Start recording")
+        self.record_button.setObjectName("recordButton")
+        self.record_button.setMinimumWidth(150)
+        capture_row.addWidget(self.record_button)
+        layout.addLayout(capture_row)
+
         self._review_timer = QTimer(self)
         self._review_timer.setInterval(1000)
         self._review_timer.timeout.connect(self._review_tick)
         self._review_seconds_left = 0
 
         self.setCentralWidget(body)
-        self.start_button.clicked.connect(self.start)
-        self.replay_response_button.clicked.connect(self._replay_response)
-        self.stop_audio_button.clicked.connect(self._stop_audio)
-        self.stop_button.clicked.connect(self.stop)
+        self.record_button.clicked.connect(self._toggle_recording)
 
         self._render_history()
         self._update_stats()
         self._fetch_models()
         self._restore_model_preference()
+        self.setStyleSheet(self.styleSheet() + """
+            QMainWindow, QWidget { background: #0B1118; color: #E8F1F5; }
+            QMenuBar, QMenu { background: #111B26; color: #E8F1F5; }
+            QMenuBar::item:selected, QMenu::item:selected { background: #263747; }
+            QTextEdit { background: #0B1118; border: 1px solid #263747; padding: 8px; }
+            QGroupBox { border: 1px solid #263747; margin-top: 10px; padding-top: 8px; }
+            QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; }
+            #statusText { font-size: 13px; }
+            #sessionStats { color: #91A4B7; font-size: 12px; }
+            #loadingStatus { color: #91A4B7; padding-left: 8px; }
+            #voiceLevel { border: 1px solid #263747; background: #111B26; min-height: 20px; }
+            #voiceLevel::chunk { background: #49D887; }
+            #recordButton { background: #49D887; color: #08110C; border: none;
+                            padding: 8px 16px; font-weight: 600; }
+            #recordButton:disabled { background: #263747; color: #91A4B7; }
+        """)
 
     # ── menu ───────────────────────────────────────────────────────────────────
 
@@ -522,10 +517,13 @@ class MainWindow(QMainWindow):
         bar = self.menuBar()
         file_menu = bar.addMenu("File")
 
-        settings_action = QAction("Settings…", self)
-        settings_action.setShortcut(QKeySequence("Ctrl+,"))
-        settings_action.triggered.connect(self._open_settings)
-        file_menu.addAction(settings_action)
+        self.new_session_action = QAction("New session", self)
+        self.new_session_action.triggered.connect(self._end_session)
+        file_menu.addAction(self.new_session_action)
+
+        self.vocabulary_action = QAction("Vocabulary…", self)
+        self.vocabulary_action.triggered.connect(self._show_vocab)
+        file_menu.addAction(self.vocabulary_action)
 
         self.progress_action = QAction("Progress…", self)
         self.progress_action.setObjectName("progressAction")
@@ -534,10 +532,52 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
+        self.replay_response_button = QAction("Replay response", self)
+        self.replay_response_button.setObjectName("replayResponseButton")
+        self.replay_response_button.setEnabled(False)
+        self.replay_response_button.triggered.connect(self._replay_response)
+        file_menu.addAction(self.replay_response_button)
+
+        self.stop_audio_button = QAction("Stop audio", self)
+        self.stop_audio_button.setObjectName("stopAudioButton")
+        self.stop_audio_button.setEnabled(False)
+        self.stop_audio_button.triggered.connect(self._stop_audio)
+        file_menu.addAction(self.stop_audio_button)
+
+        self.flow_action = QAction("Fluency mode", self)
+        self.flow_action.setCheckable(True)
+        self.flow_action.toggled.connect(self._on_flow_toggled)
+        file_menu.addAction(self.flow_action)
+
+        self.scenario_menu = file_menu.addMenu("Scenario")
+        for scenario in SCENARIOS:
+            action = self.scenario_menu.addAction(scenario)
+            action.setCheckable(True)
+            action.setChecked(scenario == self.scenario_combo.currentText())
+            action.triggered.connect(
+                lambda checked, name=scenario: self._select_scenario(name)
+            )
+
+        self.model_menu = file_menu.addMenu("Model")
+        self._rebuild_model_menu()
+
+        file_menu.addSeparator()
+
+        settings_action = QAction("Settings…", self)
+        settings_action.setShortcut(QKeySequence("Ctrl+,"))
+        settings_action.triggered.connect(self._open_settings)
+        file_menu.addAction(settings_action)
+
         export_action = QAction("Export session…", self)
         export_action.setShortcut(QKeySequence("Ctrl+E"))
         export_action.triggered.connect(self._export_session)
         file_menu.addAction(export_action)
+
+        file_menu.addSeparator()
+        exit_action = QAction("Exit", self)
+        exit_action.setShortcut(QKeySequence("Ctrl+Q"))
+        exit_action.triggered.connect(self.close)
+        file_menu.addAction(exit_action)
 
     # ── keyboard shortcuts ─────────────────────────────────────────────────────
 
@@ -546,33 +586,26 @@ class MainWindow(QMainWindow):
             super().keyPressEvent(event)
             return
         key = event.key()
-        if key == Qt.Key_F2:
+        if key in (Qt.Key_F2, Qt.Key_Space):
             self._toggle_recording()
-        elif key == Qt.Key_Space:
-            if self.config.input_mode == "ptt":
-                self._begin_ptt()
-            else:
-                self._toggle_recording()
         else:
             super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event):
-        if not event.isAutoRepeat() and event.key() == Qt.Key_Space:
-            if self.config.input_mode == "ptt" and self.worker and self.worker.isRunning():
-                self.worker.end_ptt()
         super().keyReleaseEvent(event)
 
     def _toggle_recording(self):
-        if self.worker and self.worker.isRunning():
-            self.stop()
-        elif self.start_button.isEnabled():
-            self.start()
-
-    def _begin_ptt(self):
-        if not (self.worker and self.worker.isRunning()) and self.start_button.isEnabled():
-            self.start()
-        if self.worker and self.worker.isRunning():
+        if self._capture_state == "recording" and self.worker and self.worker.isRunning():
+            self.worker.end_ptt()
+            self.record_button.setEnabled(False)
+            self.record_button.setText("Finishing…")
+        elif self._capture_state == "ready" and self.worker and self.worker.isRunning():
             self.worker.begin_ptt()
+            self.record_button.setEnabled(False)
+            self.record_button.setText("Starting…")
+        elif not (self.worker and self.worker.isRunning()):
+            self._record_when_ready = True
+            self.start()
 
     # ── models ─────────────────────────────────────────────────────────────────
 
@@ -587,11 +620,6 @@ class MainWindow(QMainWindow):
             idx = self.model_combo.findText(saved)
             if idx >= 0:
                 self.model_combo.setCurrentIndex(idx)
-        saved_voice = self.db.get_setting("voice")
-        if saved_voice:
-            idx = self.voice_combo.findText(saved_voice)
-            if idx >= 0:
-                self.voice_combo.setCurrentIndex(idx)
 
     def _on_models_ready(self, names):
         current = self.model_combo.currentText()
@@ -606,13 +634,32 @@ class MainWindow(QMainWindow):
             self.model_combo.addItem(placeholder)
             self.model_combo.setEnabled(True)
         self._restore_model_preference()
+        self._rebuild_model_menu()
 
-    def _on_voice_changed(self, label: str):
-        model = VOICE_MODELS.get(label)
-        if model:
-            self.config.tts_model = model
-            self._pipeline = None  # force synthesizer reload on next Start
-            self.db.set_setting("voice", label)
+    def _rebuild_model_menu(self):
+        if not hasattr(self, "model_menu"):
+            return
+        self.model_menu.clear()
+        current = self.model_combo.currentText()
+        for index in range(self.model_combo.count()):
+            name = self.model_combo.itemText(index)
+            action = self.model_menu.addAction(name)
+            action.setCheckable(True)
+            action.setChecked(name == current)
+            action.triggered.connect(lambda checked, value=name: self._select_model(value))
+
+    def _select_model(self, name: str):
+        index = self.model_combo.findText(name)
+        if index >= 0:
+            self.model_combo.setCurrentIndex(index)
+        self._rebuild_model_menu()
+
+    def _select_scenario(self, name: str):
+        index = self.scenario_combo.findText(name)
+        if index >= 0:
+            self.scenario_combo.setCurrentIndex(index)
+        for action in self.scenario_menu.actions():
+            action.setChecked(action.text() == name)
 
     def _on_model_changed(self, name):
         if name:
@@ -625,7 +672,6 @@ class MainWindow(QMainWindow):
 
     def _on_flow_toggled(self, fluency_mode: bool):
         self._corrections_on = not fluency_mode
-        self.flow_btn.setText("Mode: Fluency" if fluency_mode else "Mode: Coaching")
         self._apply_system_prompt()
 
     def _on_scenario_changed(self, scenario_key: str):
@@ -673,9 +719,13 @@ class MainWindow(QMainWindow):
         messages = self.db.recent_messages(self.session_id, 200)
         for message in messages:
             self.history.append(self._format_message(message.role, message.content))
-        for feedback in self.db.feedback_for_session(self.session_id):
-            self.history.append(self._format_feedback(feedback))
+        self._render_fixes()
         self._assistant_open = False
+
+    def _render_fixes(self):
+        self.fixes.clear()
+        for feedback in self.db.feedback_for_session(self.session_id):
+            self.fixes.append(self._format_feedback(feedback))
 
     def _format_feedback(self, feedback: CoachFeedback):
         lines = ["<b>Coach feedback</b>"]
@@ -692,17 +742,22 @@ class MainWindow(QMainWindow):
 
     # ── start / stop ───────────────────────────────────────────────────────────
 
+    def _set_status(self, text: str):
+        self.status.setText(text)
+        if self._capture_state in {"idle", "loading"}:
+            self.loading_status.setText(text)
+            self.capture_stack.setCurrentWidget(self.loading_status)
+
     def start(self):
         if self.worker and self.worker.isRunning():
             return
         self.model_combo.setEnabled(False)
-        self.voice_combo.setEnabled(False)
         self.scenario_combo.setEnabled(False)
         self.replay_response_button.setEnabled(False)
         self.worker = ConversationWorker(
             self.config, self.context, self._selected_model(), self._pipeline, self
         )
-        self.worker.status_message.connect(self.status.setText)
+        self.worker.status_message.connect(self._set_status)
         self.worker.recording_started.connect(self._on_recording_started)
         self.worker.recording_finished.connect(self._on_recording_finished)
         self.worker.waiting_for_ptt.connect(self._on_waiting_for_ptt)
@@ -716,10 +771,11 @@ class MainWindow(QMainWindow):
         self.worker.finished.connect(self._on_finished)
         self.worker.volume_level.connect(self._on_volume)
         self.worker.speech_level.connect(self.pet.set_volume)
-        self.start_button.setEnabled(False)
-        self.stop_button.setEnabled(True)
+        self._capture_state = "loading"
+        self.record_button.setEnabled(False)
+        self.record_button.setText("Loading…")
         self._last_error = None
-        self.status.setText("Starting...")
+        self._set_status("Starting...")
         self.worker.start()
 
     def stop(self):
@@ -728,31 +784,44 @@ class MainWindow(QMainWindow):
             if self.config.input_mode == "ptt":
                 self.worker.end_ptt()
                 self.worker.begin_ptt()  # unblock any waiting
-            self.status.setText("Stopping...")
-            self.stop_button.setEnabled(False)
+            self._set_status("Stopping...")
 
     # ── worker signal handlers ─────────────────────────────────────────────────
 
     def _on_recording_started(self):
         self._last_error = None
-        self.vol_bar.setVisible(True)
+        self._capture_state = "recording"
+        self.capture_stack.setCurrentWidget(self.vol_bar)
         self.vol_bar.setValue(0)
         self.pet.set_state("listening")
         self.replay_response_button.setEnabled(False)
         self.stop_audio_button.setEnabled(False)
-        label = "Release to send" if self.config.input_mode == "ptt" else "Recording..."
-        self.status.setText(label)
+        self.record_button.setText("Finish recording")
+        self.record_button.setEnabled(True)
+        self._set_status("Recording — click Finish recording when you're done")
 
     def _on_recording_finished(self, stop_reason: str, duration_sec: float):
-        self.status.setText(f"Captured {duration_sec:.1f}s · {stop_reason}")
+        self._capture_state = "processing"
+        self.record_button.setText("Processing…")
+        self.record_button.setEnabled(False)
+        self._set_status(f"Captured {duration_sec:.1f}s · {stop_reason}")
 
     def _on_waiting_for_ptt(self):
-        self.vol_bar.setVisible(False)
+        self._capture_state = "ready"
+        self.capture_stack.setCurrentWidget(self.vol_bar)
+        self.vol_bar.setValue(0)
         self.pet.set_state("idle")
-        pipeline = self._pipeline or (self.worker.built_pipeline if self.worker else None)
+        pipeline = self._pipeline or getattr(self.worker, "built_pipeline", None)
         self.replay_response_button.setEnabled(bool(self._last_assistant_text and pipeline))
         self.stop_audio_button.setEnabled(False)
-        self.status.setText("Hold Space or the microphone button to speak")
+        self.record_button.setText("Start recording")
+        self.record_button.setEnabled(True)
+        self._set_status("Ready — click Start recording to speak")
+        if self._record_when_ready and self.worker and self.worker.isRunning():
+            self._record_when_ready = False
+            self.worker.begin_ptt()
+            self.record_button.setEnabled(False)
+            self.record_button.setText("Starting…")
 
     def _on_volume(self, rms: float):
         self.vol_bar.setValue(min(100, int(rms * _VOL_SCALE)))
@@ -760,16 +829,15 @@ class MainWindow(QMainWindow):
 
     def _on_audio_playing(self):
         self.pet.set_state("speaking")
-        self.status.setText("Playing audio...")
+        self._set_status("Playing audio...")
         self.replay_response_button.setEnabled(False)
         self.stop_audio_button.setEnabled(True)
 
     def _on_ready(self):
-        self.vol_bar.setVisible(False)
         self.pet.set_state("idle")
         self.stop_audio_button.setEnabled(False)
         if self._last_error is None:
-            self.status.setText(self._idle_instruction())
+            self._set_status(self._idle_instruction())
 
     def _on_transcript_review(self, text: str):
         """Show the editable review bar with a 5-second auto-confirm countdown."""
@@ -780,7 +848,7 @@ class MainWindow(QMainWindow):
         self._review_edit.setFocus()
         self._review_edit.selectAll()
         self._review_timer.start()
-        self.status.setText("Edit the transcript, then send or retry · sending in 5s")
+        self._set_status("Edit the transcript, then send or retry · sending in 5s")
 
     def _review_tick(self):
         self._review_seconds_left -= 1
@@ -806,7 +874,7 @@ class MainWindow(QMainWindow):
         self._append("\nDogen: ")
         self._assistant_open = True
         self.pet.set_state("thinking")
-        self.status.setText("Thinking...")
+        self._set_status("Thinking...")
 
     def _on_chunk(self, text):
         self._append(text)
@@ -816,7 +884,7 @@ class MainWindow(QMainWindow):
             self._render_history()
         self._last_error = text
         self.pet.set_state("idle")
-        self.status.setText(text)
+        self._set_status(text)
 
     def _on_completed(self, result, latency_ms):
         try:
@@ -839,24 +907,24 @@ class MainWindow(QMainWindow):
                 del self.context.messages[-2:]
             self._render_history()
             self._last_error = f"Could not save turn: {exc}"
-            self.status.setText(f"Could not save turn: {exc}")
+            self._set_status(f"Could not save turn: {exc}")
 
     def _on_finished(self):
         if self.worker and self.worker.built_pipeline:
             self._pipeline = self.worker.built_pipeline
         if self._assistant_open:
             self._render_history()
-        self.vol_bar.setVisible(False)
+        self._capture_state = "idle"
+        self.capture_stack.setCurrentWidget(self.loading_status)
         self.pet.set_state("idle")
-        self.start_button.setEnabled(True)
-        self.stop_button.setEnabled(False)
+        self.record_button.setEnabled(True)
+        self.record_button.setText("Start recording")
         self.model_combo.setEnabled(True)
-        self.voice_combo.setEnabled(True)
         self.scenario_combo.setEnabled(True)
         self.stop_audio_button.setEnabled(False)
         self.replay_response_button.setEnabled(bool(self._last_assistant_text and self._pipeline))
         if self._last_error is None:
-            self.status.setText(self._idle_instruction())
+            self._set_status(self._idle_instruction())
         if self._closing:
             self.close()
 
@@ -870,9 +938,7 @@ class MainWindow(QMainWindow):
         self.history.ensureCursorVisible()
 
     def _idle_instruction(self):
-        if self.config.input_mode == "ptt":
-            return "Hold Space or the microphone button to speak"
-        return "Start speaking; Dogen sends after the selected pause"
+        return "Ready — click Start recording to speak"
 
     def _replay_response(self):
         pipeline = self._pipeline or (self.worker.built_pipeline if self.worker else None)
@@ -897,7 +963,7 @@ class MainWindow(QMainWindow):
 
     def _on_replay_error(self, text):
         self._last_error = f"Could not play this response: {text}"
-        self.status.setText(self._last_error)
+        self._set_status(self._last_error)
 
     def _on_replay_finished(self):
         self.stop_audio_button.setEnabled(False)
@@ -905,7 +971,7 @@ class MainWindow(QMainWindow):
         pipeline = self._pipeline or (self.worker.built_pipeline if self.worker else None)
         self.replay_response_button.setEnabled(bool(self._last_assistant_text and pipeline))
         if self._last_error is None:
-            self.status.setText(self._idle_instruction())
+            self._set_status(self._idle_instruction())
 
     # ── settings ───────────────────────────────────────────────────────────────
 

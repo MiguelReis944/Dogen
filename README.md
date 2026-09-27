@@ -12,11 +12,13 @@ start.bat
 
 Para setup manual, veja [docs/SETUP.md](docs/SETUP.md).
 
-Clique em **Start Recording** para começar. Dogen começa a responder assim que o turno termina — a primeira sentença toca enquanto as demais são sintetizadas. **Stop** interrompe a sessão; uma inferência já iniciada pode levar alguns segundos para terminar.
+Clique em **Start recording** para começar a falar e em **Finish recording** para enviar. Dogen começa a responder assim que o turno termina — a primeira sentença toca enquanto as demais são sintetizadas.
 
 ## Prática diária
 
-O modo padrão é **Push-to-talk**: segure Espaço ou o botão do microfone enquanto fala e solte para enviar. Ele oferece controle direto e evita que uma pausa natural corte a frase.
+O modo de gravação é controlado por cliques: um clique começa e outro termina. Isso evita que uma pausa natural corte a frase e não exige segurar uma tecla. A barra ao lado do botão mostra o volume captado; durante o carregamento, o mesmo espaço explica o que Dogen está preparando.
+
+A conversa ocupa o painel principal. **Fixes** mostra correções e frases alternativas sem poluir o diálogo, e **Status** mostra o estágio atual. Ações secundárias, seleção de cenário e seleção de modelo ficam no menu **File**. A narração usa somente a voz feminina local.
 
 O modo **Automatic** encerra o turno depois do intervalo configurado. Em **Settings**, escolha Short (1,2 s), Normal (2,0 s), Long (3,0 s) ou um valor personalizado. Ative **Review transcript before sending** para corrigir o texto reconhecido antes de enviá-lo ao coach; a revisão é enviada automaticamente depois de cinco segundos se não houver edição.
 

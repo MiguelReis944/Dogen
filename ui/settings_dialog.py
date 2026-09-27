@@ -4,17 +4,10 @@ import json
 from pathlib import Path
 
 from PyQt5.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox,
-                              QDoubleSpinBox, QFormLayout, QGroupBox, QSpinBox,
-                              QVBoxLayout)
+                              QDoubleSpinBox, QFormLayout, QGroupBox, QLabel,
+                              QSpinBox, QVBoxLayout)
 
 from utils.config import AppConfig, save_config
-
-
-PAUSE_PRESETS = {
-    "Short": 1.2,
-    "Normal": 2.0,
-    "Long": 3.0,
-}
 
 
 class SettingsDialog(QDialog):
@@ -49,8 +42,8 @@ class SettingsDialog(QDialog):
         form1.addRow("", self._noise_reduction)
         outer.addWidget(stt_box)
 
-        # ── Voice Detection ────────────────────────────────────────────────────
-        vad_box = QGroupBox("Voice Detection")
+        # ── Recording ──────────────────────────────────────────────────────────
+        vad_box = QGroupBox("Recording")
         form2 = QFormLayout(vad_box)
         self._threshold = QDoubleSpinBox()
         self._threshold.setRange(0.001, 0.1)
@@ -59,29 +52,7 @@ class SettingsDialog(QDialog):
         self._threshold.setValue(config.vad_threshold)
         form2.addRow("Mic sensitivity:", self._threshold)
 
-        self._input_mode = QComboBox()
-        self._input_mode.setObjectName("inputModeCombo")
-        self._input_mode.addItem("Push-to-talk", "ptt")
-        self._input_mode.addItem("Automatic", "vad")
-        self._input_mode.setCurrentIndex(max(self._input_mode.findData(config.input_mode), 0))
-        form2.addRow("Input mode:", self._input_mode)
-
-        self._pause_preset = QComboBox()
-        self._pause_preset.setObjectName("pausePresetCombo")
-        for label, seconds in PAUSE_PRESETS.items():
-            self._pause_preset.addItem(label, seconds)
-        self._pause_preset.addItem("Custom", None)
-        form2.addRow("Automatic pause:", self._pause_preset)
-
-        self._silence = QDoubleSpinBox()
-        self._silence.setRange(0.3, 5.0)
-        self._silence.setSingleStep(0.1)
-        self._silence.setDecimals(1)
-        self._silence.setValue(config.silence_duration_sec)
-        form2.addRow("Custom pause (s):", self._silence)
-        self._pause_preset.currentIndexChanged.connect(self._apply_pause_preset)
-        self._silence.valueChanged.connect(self._sync_pause_preset)
-        self._sync_pause_preset(config.silence_duration_sec)
+        form2.addRow("Control:", QLabel("Click once to start, once to finish"))
         outer.addWidget(vad_box)
 
         # ── Conversation ───────────────────────────────────────────────────────
@@ -104,23 +75,7 @@ class SettingsDialog(QDialog):
         self.config.review_transcript   = self._review.isChecked()
         self.config.noise_reduction     = self._noise_reduction.isChecked()
         self.config.vad_threshold       = self._threshold.value()
-        self.config.silence_duration_sec = self._silence.value()
-        self.config.input_mode          = self._input_mode.currentData()
+        self.config.input_mode          = "ptt"
         self.config.context_size        = self._context_size.value()
         save_config(self.config, self.settings_path)
         self.accept()
-
-    def _apply_pause_preset(self, index):
-        seconds = self._pause_preset.itemData(index)
-        if seconds is not None:
-            self._silence.setValue(float(seconds))
-
-    def _sync_pause_preset(self, seconds):
-        index = self._pause_preset.findText("Custom")
-        for label, preset_seconds in PAUSE_PRESETS.items():
-            if abs(float(seconds) - preset_seconds) < 0.001:
-                index = self._pause_preset.findText(label)
-                break
-        self._pause_preset.blockSignals(True)
-        self._pause_preset.setCurrentIndex(index)
-        self._pause_preset.blockSignals(False)
