@@ -351,7 +351,8 @@ class MainWindow(QMainWindow):
                  auto_start=True, start_maximized=True):
         super().__init__()
         self.setWindowTitle("Dogen")
-        self.resize(780, 640)
+        self.setMinimumSize(1100, 700)
+        self.resize(1280, 820)
         self.config = config
         self.db = db
         self.context = context
@@ -366,8 +367,9 @@ class MainWindow(QMainWindow):
         self._startup_timer = None
         self._last_error = None
         self._corrections_on = True
-        self._capture_state = "idle"
+        self._capture_state = "ready"
         self._record_when_ready = False
+        self.status_group = None
 
         # The focused conversation experience has one supported input and voice.
         self.config.input_mode = "ptt"
@@ -428,16 +430,14 @@ class MainWindow(QMainWindow):
         fixes_layout.addWidget(self.fixes)
         side_layout.addWidget(self.fixes_group, stretch=3)
 
-        self.status_group = QGroupBox("Status")
-        status_layout = QVBoxLayout(self.status_group)
-        status_layout.addWidget(self.status)
-        status_layout.addStretch(1)
-        status_layout.addWidget(self.stats_label)
-        side_layout.addWidget(self.status_group, stretch=2)
+        side.setMinimumWidth(320)
+        side.setMaximumWidth(420)
         content.addWidget(side)
+        content.setChildrenCollapsible(False)
         content.setStretchFactor(0, 7)
         content.setStretchFactor(1, 3)
         content.setSizes([680, 300])
+        self.history.setMinimumWidth(500)
         layout.addWidget(content, stretch=1)
 
         # ── transcript review bar (hidden until review_transcript is on) ───────
@@ -467,19 +467,27 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._review_bar)
 
         # ── capture controls ───────────────────────────────────────────────────
-        capture_row = QHBoxLayout()
+        self.capture_hud = QWidget()
+        self.capture_hud.setObjectName("captureHud")
+        capture_row = QHBoxLayout(self.capture_hud)
+        capture_row.setContentsMargins(12, 8, 12, 8)
         capture_row.setSpacing(10)
         self.capture_stack = QStackedWidget()
-        self.loading_status = QLabel("Start a conversation when you're ready")
+        self.capture_stack.setObjectName("captureStack")
+        self.loading_status = self.status
         self.loading_status.setObjectName("loadingStatus")
         self.loading_status.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
         self.loading_status.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
-        self.vol_bar = QProgressBar()
-        self.vol_bar.setObjectName("voiceLevel")
-        self.vol_bar.setRange(0, 100)
-        self.vol_bar.setTextVisible(False)
+        self.loading_status.setMaximumHeight(46)
+        self.volume_bar = QProgressBar()
+        self.volume_bar.setObjectName("voiceLevel")
+        self.volume_bar.setRange(0, 100)
+        self.volume_bar.setTextVisible(False)
+        self.volume_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.volume_bar.setMinimumHeight(22)
+        self.vol_bar = self.volume_bar
         self.capture_stack.addWidget(self.loading_status)
-        self.capture_stack.addWidget(self.vol_bar)
+        self.capture_stack.addWidget(self.volume_bar)
         self.capture_stack.setCurrentWidget(self.loading_status)
         capture_row.addWidget(self.capture_stack, stretch=1)
 
@@ -487,7 +495,7 @@ class MainWindow(QMainWindow):
         self.record_button.setObjectName("recordButton")
         self.record_button.setMinimumWidth(150)
         capture_row.addWidget(self.record_button)
-        layout.addLayout(capture_row)
+        layout.addWidget(self.capture_hud)
 
         self._review_timer = QTimer(self)
         self._review_timer.setInterval(1000)
@@ -495,6 +503,7 @@ class MainWindow(QMainWindow):
         self._review_seconds_left = 0
 
         self.setCentralWidget(body)
+        self._set_capture_state("ready", self._idle_instruction())
         self.record_button.clicked.connect(self._toggle_recording)
 
         self._render_history()
@@ -511,6 +520,8 @@ class MainWindow(QMainWindow):
             #statusText { font-size: 13px; }
             #sessionStats { color: #91A4B7; font-size: 12px; }
             #loadingStatus { color: #91A4B7; padding-left: 8px; }
+            #captureHud { background: #111B26; border: 1px solid #263747; border-radius: 6px; }
+            #captureStack { min-height: 28px; }
             #voiceLevel { border: 1px solid #263747; background: #111B26; min-height: 20px; }
             #voiceLevel::chunk { background: #49D887; }
             #recordButton { background: #49D887; color: #08110C; border: none;
@@ -769,10 +780,28 @@ class MainWindow(QMainWindow):
         self.settings_action.setEnabled(enabled)
 
     def _set_status(self, text: str):
-        self.status.setText(text)
-        if self._capture_state in {"idle", "loading"}:
-            self.loading_status.setText(text)
-            self.capture_stack.setCurrentWidget(self.loading_status)
+        state = self._capture_state
+        if state not in {"loading", "ready", "recording", "processing", "error"}:
+            state = "ready"
+        self._set_capture_state(state, text)
+
+    def _set_capture_state(self, state: str, message: str = ""):
+        if state not in {"loading", "ready", "recording", "processing", "error"}:
+            raise ValueError(f"Unknown capture state: {state}")
+        self._capture_state = state
+        if message:
+            self.status.setText(message)
+        self.capture_stack.setCurrentWidget(
+            self.volume_bar if state == "recording" else self.loading_status
+        )
+        if state != "recording":
+            self.volume_bar.setValue(0)
+
+    def _render_volume(self, rms: float):
+        if self._capture_state != "recording":
+            self.volume_bar.setValue(0)
+            return
+        self.volume_bar.setValue(min(100, max(0, int(rms * _VOL_SCALE))))
 
     def start(self):
         if self.worker and self.worker.isRunning():
@@ -796,7 +825,7 @@ class MainWindow(QMainWindow):
         self.worker.finished.connect(self._on_finished)
         self.worker.volume_level.connect(self._on_volume)
         self.worker.speech_level.connect(self.pet.set_volume)
-        self._capture_state = "loading"
+        self._set_capture_state("loading")
         self.record_button.setEnabled(False)
         self.record_button.setText("Loading…")
         self._last_error = None
@@ -815,33 +844,29 @@ class MainWindow(QMainWindow):
 
     def _on_recording_started(self):
         self._last_error = None
-        self._capture_state = "recording"
-        self.capture_stack.setCurrentWidget(self.vol_bar)
-        self.vol_bar.setValue(0)
+        self._set_capture_state("recording")
         self.pet.set_state("listening")
         self.replay_response_button.setEnabled(False)
         self.stop_audio_button.setEnabled(False)
         self.record_button.setText("Finish recording")
         self.record_button.setEnabled(True)
-        self._set_status("Recording — click Finish recording when you're done")
+        self._set_capture_state("recording", "Recording — click Finish recording when you're done")
 
     def _on_recording_finished(self, stop_reason: str, duration_sec: float):
-        self._capture_state = "processing"
+        self._set_capture_state("processing")
         self.record_button.setText("Processing…")
         self.record_button.setEnabled(False)
         self._set_status(f"Captured {duration_sec:.1f}s · {stop_reason}")
 
     def _on_waiting_for_ptt(self):
-        self._capture_state = "ready"
-        self.capture_stack.setCurrentWidget(self.vol_bar)
-        self.vol_bar.setValue(0)
+        self._set_capture_state("ready")
         self.pet.set_state("idle")
         pipeline = self._pipeline or getattr(self.worker, "built_pipeline", None)
         self.replay_response_button.setEnabled(bool(self._last_assistant_text and pipeline))
         self.stop_audio_button.setEnabled(False)
         self.record_button.setText("Start recording")
         self.record_button.setEnabled(True)
-        self._set_status("Ready — click Start recording to speak")
+        self._set_capture_state("ready", "Ready — click Start recording to speak")
         if self._record_when_ready and self.worker and self.worker.isRunning():
             self._record_when_ready = False
             self.worker.begin_ptt()
@@ -849,12 +874,12 @@ class MainWindow(QMainWindow):
             self.record_button.setText("Starting…")
 
     def _on_volume(self, rms: float):
-        self.vol_bar.setValue(min(100, int(rms * _VOL_SCALE)))
+        self._render_volume(rms)
         self.pet.set_volume(rms)
 
     def _on_audio_playing(self):
         self.pet.set_state("speaking")
-        self._set_status("Playing audio...")
+        self._set_capture_state("processing", "Playing audio...")
         self.replay_response_button.setEnabled(False)
         self.stop_audio_button.setEnabled(True)
 
@@ -899,6 +924,7 @@ class MainWindow(QMainWindow):
         self._append("\nDogen: ")
         self._assistant_open = True
         self.pet.set_state("thinking")
+        self._set_capture_state("processing")
         self._set_status("Thinking...")
 
     def _on_chunk(self, text):
@@ -909,6 +935,7 @@ class MainWindow(QMainWindow):
             self._render_history()
         self._last_error = text
         self.pet.set_state("idle")
+        self._set_capture_state("error")
         self._set_status(text)
 
     def _on_completed(self, result, latency_ms):
@@ -939,8 +966,7 @@ class MainWindow(QMainWindow):
             self._pipeline = self.worker.built_pipeline
         if self._assistant_open:
             self._render_history()
-        self._capture_state = "idle"
-        self.capture_stack.setCurrentWidget(self.loading_status)
+        self._set_capture_state("error" if self._last_error else "ready")
         self.pet.set_state("idle")
         if self._last_error is None:
             self.record_button.setEnabled(True)

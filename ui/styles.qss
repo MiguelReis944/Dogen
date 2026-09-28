@@ -4,6 +4,18 @@
     font-family: "Cascadia Mono", "Consolas", "Courier New", monospace;
 }
 
+#captureHud {
+    background: #111720;
+    border: 1px solid #263747;
+    border-radius: 6px;
+}
+#loadingStatus {
+    padding-left: 8px;
+    max-height: 46px;
+}
+#captureStack { min-height: 28px; }
+#voiceLevel { min-height: 22px; }
+
 QWidget { background: #0a0e14; color: #d7ffe4; font-size: 13px; }
 QMainWindow { background: #0a0e14; }
 

@@ -103,6 +103,30 @@ def test_window_keeps_dogen_name_and_single_record_control(tmp_path):
         window.close()
 
 
+def test_window_has_stable_minimum_and_capture_hud(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        assert window.minimumWidth() >= 1100
+        assert window.minimumHeight() >= 700
+        assert window.capture_hud is not None
+        assert window.status_group is None
+        window.close()
+
+
+def test_volume_is_hidden_outside_recording(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        window._set_capture_state("ready", "Ready")
+        window._render_volume(0.9)
+        assert window.volume_bar.value() == 0
+        window._set_capture_state("recording")
+        window._render_volume(0.9)
+        assert window.volume_bar.value() > 0
+        window.close()
+
+
 def test_record_button_clicks_start_and_finish_capture(tmp_path):
     app = QApplication.instance() or QApplication([])
 
@@ -160,7 +184,7 @@ def test_loading_message_uses_meter_region_until_worker_is_ready(tmp_path):
         assert window.loading_status.text() == "Loading local speech models..."
 
         window._on_waiting_for_ptt()
-        assert window.capture_stack.currentWidget() is window.vol_bar
+        assert window.capture_stack.currentWidget() is window.loading_status
         window.close()
 
 
@@ -368,7 +392,7 @@ def test_completed_turn_renders_and_persists_feedback_separately(tmp_path):
         assert "I goed home → I went home" not in conversation
         assert "I goed home → I went home" in fixes
         assert window.fixes_group.title() == "Fixes"
-        assert window.status_group.title() == "Status"
+        assert window.status_group is None
         assert db.feedback_for_session("session") == [result.feedback]
         assert db.recent_messages("session", 2)[1].content == "What did you do there?"
         window.close()
