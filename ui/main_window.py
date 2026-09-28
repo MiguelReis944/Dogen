@@ -849,6 +849,8 @@ class MainWindow(QMainWindow):
     def _set_capture_state(self, state: str, message: str = ""):
         if state not in {"loading", "ready", "recording", "processing", "error"}:
             raise ValueError(f"Unknown capture state: {state}")
+        if self._capture_state == "recording" and state != "recording":
+            self.pet.set_volume(0)
         self._capture_state = state
         if message:
             self.status.setText(message)
@@ -937,7 +939,8 @@ class MainWindow(QMainWindow):
 
     def _on_volume(self, rms: float):
         self._render_volume(rms)
-        self.pet.set_volume(rms)
+        if self._capture_state == "recording":
+            self.pet.set_volume(rms)
 
     def _on_audio_playing(self):
         self.pet.set_state("speaking")

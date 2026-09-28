@@ -395,6 +395,25 @@ def test_quiet_speech_has_visible_meter_without_changing_vad(tmp_path):
         window.close()
 
 
+def test_recording_exit_clears_face_and_ignores_late_mic_volume(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        window._set_capture_state("recording")
+        window._on_volume(0.08)
+        assert window.pet.visual_volume > 0.4
+
+        window._on_recording_finished("manual", 1.0)
+        assert window.volume_bar.value() == 0
+        assert window.pet.visual_volume == 0
+
+        window._on_volume(0.08)
+        assert window.pet.visual_volume == 0
+        window._on_audio_playing()
+        assert window.pet.visual_volume == 0
+        window.close()
+
+
 def test_next_worker_reuses_completed_pipeline(tmp_path):
     app = QApplication.instance() or QApplication([])
     with Database(tmp_path / "conversation.db") as db:
