@@ -415,6 +415,28 @@ def test_export_session_contains_only_current_session(tmp_path):
         window.close()
 
 
+def test_export_session_includes_messages_beyond_recent_history_limit(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    target = tmp_path / "long-session.txt"
+    with Database(tmp_path / "conversation.db") as db:
+        with db.connection:
+            db.connection.executemany(
+                "INSERT INTO conversations(session_id,role,content,model_used,latency_ms) "
+                "VALUES(?,?,?,?,?)",
+                (("session", "user", f"Message {index}", "mistral", 0)
+                 for index in range(10001)),
+            )
+        window = _make_window(db)
+        with patch("ui.main_window.QFileDialog.getSaveFileName", return_value=(str(target), "")):
+            window._export_session()
+        exported = target.read_text(encoding="utf-8")
+        assert exported.count("You: Message ") == 10001
+        assert "You: Message 0\n" in exported
+        assert "You: Message 10000\n" in exported
+        assert exported.index("You: Message 0\n") < exported.index("You: Message 10000\n")
+        window.close()
+
+
 def test_replay_completion_returns_capture_hud_to_ready(tmp_path):
     app = QApplication.instance() or QApplication([])
     with Database(tmp_path / "conversation.db") as db:

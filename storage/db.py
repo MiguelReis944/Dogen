@@ -137,6 +137,16 @@ class Database:
         ).fetchall()
         return [Message(*row) for row in rows]
 
+    def session_messages(self, session_id: str):
+        """Iterate every message in one session in conversation order."""
+        rows = self.connection.execute(
+            "SELECT role,content,created_at,model_used,latency_ms "
+            "FROM conversations WHERE session_id=? ORDER BY id",
+            (session_id,),
+        )
+        for row in rows:
+            yield Message(*row)
+
     def recent_all_messages(self, count: int) -> list[Message]:
         """Load the most recent messages across all sessions (for cross-day history display)."""
         rows = self.connection.execute(

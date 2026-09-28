@@ -1141,19 +1141,16 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
-        messages = self.db.recent_messages(self.session_id, 10000)
-        lines = []
-        last_date = None
-        for m in messages:
-            date = m.created_at[:10] if m.created_at else ""
-            if date != last_date:
-                lines.append(f"\n── {date} ──\n")
-                last_date = date
-            label = "You" if m.role == "user" else "Dogen"
-            lines.append(f"{label}: {m.content}\n")
         try:
             with open(path, "w", encoding="utf-8") as f:
-                f.writelines(lines)
+                last_date = None
+                for m in self.db.session_messages(self.session_id):
+                    date = m.created_at[:10] if m.created_at else ""
+                    if date != last_date:
+                        f.write(f"\n── {date} ──\n")
+                        last_date = date
+                    label = "You" if m.role == "user" else "Dogen"
+                    f.write(f"{label}: {m.content}\n")
             self.status.setText(f"Exported to {path}")
         except OSError as exc:
             self.status.setText(f"Export failed: {exc}")
