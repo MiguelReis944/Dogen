@@ -1024,8 +1024,8 @@ class MainWindow(QMainWindow):
         self.pet.set_state("idle")
         pipeline = self._pipeline or (self.worker.built_pipeline if self.worker else None)
         self.replay_response_button.setEnabled(bool(self._last_assistant_text and pipeline))
-        if self._last_error is None:
-            self._set_status(self._idle_instruction())
+        state = "error" if self._last_error else "ready"
+        self._set_capture_state(state, self._last_error or self._idle_instruction())
 
     # ── settings ───────────────────────────────────────────────────────────────
 

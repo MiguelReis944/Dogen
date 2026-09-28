@@ -368,6 +368,28 @@ def test_response_audio_controls_follow_replay_state(tmp_path):
         window.close()
 
 
+def test_replay_completion_returns_capture_hud_to_ready(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        window._last_assistant_text = "Replay this response"
+        window._pipeline = object()
+
+        window._on_audio_playing()
+        assert window._capture_state == "processing"
+        assert window.status.text() == "Playing audio..."
+
+        window._on_replay_finished()
+        assert window._capture_state == "ready"
+        assert window.status.text() == "Ready — click Start recording to speak"
+        assert window.capture_stack.currentWidget() is window.loading_status
+
+        window._on_recording_started()
+        assert window._capture_state == "recording"
+        assert window.record_button.text() == "Finish recording"
+        window.close()
+
+
 def test_completed_turn_renders_and_persists_feedback_separately(tmp_path):
     app = QApplication.instance() or QApplication([])
     with Database(tmp_path / "conversation.db") as db:
