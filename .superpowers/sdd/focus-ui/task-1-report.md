@@ -12,6 +12,7 @@
 - Depois da mudança: `PYTHONPATH=. pytest tests/test_window.py -q` — 26 passaram.
 - `git diff --check` — sem erros de whitespace.
 - Revisão de replay: `PYTHONPATH=. pytest tests/test_window.py -q` — 27 passaram, incluindo retorno do HUD a `ready` ao concluir replay e a retomada do fluxo `recording`.
+- Revisão do erro de replay: `PYTHONPATH=. pytest tests/test_window.py -q` — 28 passaram, incluindo falha de replay com botão de gravação ainda operacional.
 
 ## Decisões
 
@@ -20,7 +21,7 @@
 - A janela tem mínimo de 1100 × 700; a lateral fica entre 320 e 420 px, e a conversa mantém largura mínima de 500 px.
 - O rótulo de estado tem largura ignorada pelo layout e altura limitada para mensagens longas não redimensionarem a janela.
 - Os fluxos dos botões `Start recording` e `Finish recording` e o pipeline não foram alterados.
-- Ao concluir replay, o HUD volta a `ready` (ou mantém `error` caso a reprodução falhe), preservando o caminho seguinte de gravação.
+- Ao concluir replay, o HUD volta a `ready`; falhas de reprodução mantêm a captura pronta para iniciar, enquanto erros do worker de captura preservam `error` e desabilitam o botão.
 
 ## Preocupações
 

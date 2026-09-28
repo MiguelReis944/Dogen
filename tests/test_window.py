@@ -390,6 +390,41 @@ def test_replay_completion_returns_capture_hud_to_ready(tmp_path):
         window.close()
 
 
+def test_replay_error_keeps_start_recording_operational(tmp_path):
+    app = QApplication.instance() or QApplication([])
+
+    class RunningWorker:
+        def __init__(self):
+            self.started = 0
+
+        def isRunning(self):
+            return True
+
+        def begin_ptt(self):
+            self.started += 1
+
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        window._last_assistant_text = "Replay this response"
+        window._pipeline = object()
+        worker = RunningWorker()
+        window.worker = worker
+        window._on_waiting_for_ptt()
+
+        window._on_audio_playing()
+        window._on_replay_error("speaker unavailable")
+        window._on_replay_finished()
+
+        assert window._capture_state == "ready"
+        assert window.status.text() == "Could not play this response: speaker unavailable"
+        assert window.record_button.isEnabled()
+        assert window.record_button.text() == "Start recording"
+        window.record_button.click()
+        assert worker.started == 1
+        assert window.record_button.text() == "Starting…"
+        window.close()
+
+
 def test_completed_turn_renders_and_persists_feedback_separately(tmp_path):
     app = QApplication.instance() or QApplication([])
     with Database(tmp_path / "conversation.db") as db:

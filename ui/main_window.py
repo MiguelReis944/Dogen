@@ -366,6 +366,7 @@ class MainWindow(QMainWindow):
         self._closing = False
         self._startup_timer = None
         self._last_error = None
+        self._replay_error = None
         self._corrections_on = True
         self._capture_state = "ready"
         self._record_when_ready = False
@@ -844,6 +845,7 @@ class MainWindow(QMainWindow):
 
     def _on_recording_started(self):
         self._last_error = None
+        self._replay_error = None
         self._set_capture_state("recording")
         self.pet.set_state("listening")
         self.replay_response_button.setEnabled(False)
@@ -1000,6 +1002,7 @@ class MainWindow(QMainWindow):
             return
         if self._replay_worker and self._replay_worker.isRunning():
             return
+        self._replay_error = None
         self.replay_response_button.setEnabled(False)
         self._replay_worker = ReplayWorker(pipeline, self._last_assistant_text, self)
         self._replay_worker.audio_playing.connect(self._on_audio_playing)
@@ -1016,16 +1019,19 @@ class MainWindow(QMainWindow):
         self.stop_audio_button.setEnabled(False)
 
     def _on_replay_error(self, text):
-        self._last_error = f"Could not play this response: {text}"
-        self._set_status(self._last_error)
+        self._replay_error = f"Could not play this response: {text}"
 
     def _on_replay_finished(self):
         self.stop_audio_button.setEnabled(False)
         self.pet.set_state("idle")
         pipeline = self._pipeline or (self.worker.built_pipeline if self.worker else None)
         self.replay_response_button.setEnabled(bool(self._last_assistant_text and pipeline))
-        state = "error" if self._last_error else "ready"
-        self._set_capture_state(state, self._last_error or self._idle_instruction())
+        if self._last_error:
+            self._set_capture_state("error", self._last_error)
+            self.record_button.setEnabled(False)
+            self.record_button.setText("Unavailable")
+        else:
+            self._set_capture_state("ready", self._replay_error or self._idle_instruction())
 
     # ── settings ───────────────────────────────────────────────────────────────
 
