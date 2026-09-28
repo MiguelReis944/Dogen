@@ -6,6 +6,7 @@ import re
 import threading
 import time
 import uuid
+from datetime import date, datetime
 
 import numpy as np
 from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
@@ -422,6 +423,14 @@ class MainWindow(QMainWindow):
         side_layout.setContentsMargins(0, 0, 0, 0)
         side_layout.setSpacing(8)
 
+        self.today_group = QGroupBox("Today")
+        today_layout = QVBoxLayout(self.today_group)
+        self.today = QLabel()
+        self.today.setObjectName("todaySummary")
+        self.today.setWordWrap(True)
+        today_layout.addWidget(self.today)
+        side_layout.addWidget(self.today_group, stretch=1)
+
         self.fixes_group = QGroupBox("Fixes")
         fixes_layout = QVBoxLayout(self.fixes_group)
         self.fixes = QTextEdit()
@@ -722,6 +731,46 @@ class MainWindow(QMainWindow):
             self.stats_label.setText(f"{stats['turns']} turns · {avg_s:.1f}s avg")
         else:
             self.stats_label.setText("")
+        self._render_today()
+
+    def _render_today(self):
+        today = date.today()
+        today_text = today.isoformat()
+        connection = self.db.connection
+        turn_sessions = connection.execute(
+            "SELECT session_id, COUNT(*), MIN(created_at), MAX(created_at) FROM conversations "
+            "WHERE role='user' AND date(created_at)=? GROUP BY session_id",
+            (today_text,),
+        ).fetchall()
+        minutes = sum(
+            max(0.0, (datetime.fromisoformat(last) - datetime.fromisoformat(first)).total_seconds())
+            for _, _, first, last in turn_sessions
+            if first and last
+        ) / 60
+        turns = sum(count for _, count, _, _ in turn_sessions)
+        words, fillers = connection.execute(
+            "SELECT COALESCE(SUM(word_count),0), COALESCE(SUM(filler_count),0) "
+            "FROM turn_metrics WHERE date(created_at)=?",
+            (today_text,),
+        ).fetchone()
+        corrections = connection.execute(
+            "SELECT COUNT(*) FROM vocab WHERE date(created_at)=?", (today_text,)
+        ).fetchone()[0]
+        streak = ProgressService(self.db).stats(7, today).current_streak
+        fillers_per_100 = float(fillers) * 100 / words if words else None
+        filler_text = (
+            f"{fillers_per_100:.1f}"
+            if fillers_per_100 is not None
+            else "Not enough data"
+        )
+        self.today.setText(
+            f"Active minutes: {minutes:.1f}\n"
+            f"Words spoken: {words}\n"
+            f"Completed turns: {turns}\n"
+            f"Fillers / 100 words: {filler_text}\n"
+            f"Corrections: {corrections}\n"
+            f"Streak: {streak}"
+        )
 
     # ── history rendering ──────────────────────────────────────────────────────
 

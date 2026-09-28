@@ -448,10 +448,54 @@ def test_completed_turn_renders_and_persists_feedback_separately(tmp_path):
         assert "Coach feedback" not in conversation
         assert "I goed home → I went home" not in conversation
         assert "I goed home → I went home" in fixes
+        assert "I headed home." in fixes
+        assert "Category: verb tense" in fixes
         assert window.fixes_group.title() == "Fixes"
         assert window.status_group is None
         assert db.feedback_for_session("session") == [result.feedback]
         assert db.recent_messages("session", 2)[1].content == "What did you do there?"
+        window.close()
+
+
+def test_today_shows_passive_activity_metrics_without_action_buttons(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        db.add_completed_turn(
+            "session",
+            "I goed home",
+            "What did you do there?",
+            "mistral",
+            100,
+            CoachFeedback(
+                correction="I goed home → I went home",
+                category="verb_tense",
+            ),
+            TurnMetrics(50, 2, False, "verb_tense"),
+        )
+        window = _make_window(db)
+
+        summary = window.today.text().lower()
+        assert not window.today.findChildren(QPushButton)
+        assert "active minutes" in summary
+        assert "words spoken" in summary
+        assert "completed turns" in summary
+        assert "fillers / 100 words" in summary
+        assert "corrections" in summary
+        assert "streak" in summary
+        assert "words spoken: 50" in summary
+        assert "completed turns: 1" in summary
+        assert "fillers / 100 words: 4.0" in summary
+        assert "corrections: 1" in summary
+        window.close()
+
+
+def test_fixes_is_read_only_without_correction_input(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+
+        assert window.fixes.isReadOnly()
+        assert not hasattr(window, "correction_input")
         window.close()
 
 
