@@ -4,6 +4,14 @@
 
 **Status:** implementation complete; human acceptance pending
 
+## Focus UI checkpoint â€” 2026-09-28
+
+- `PYTHONPATH=. pytest -q`: 110 passed in the final run (11.45 seconds) after updating the existing Ollama fake to accept and assert `keep_alive=-1`. The first full run had 109 passed and one failure because that fake rejected the new argument; no product code changed for this checkpoint.
+- `git diff --check`: exit code 0, with Git line-ending warnings for the edited report and `tests/test_core.py`, and no whitespace errors.
+- Windows reported an input device (`Microfone (High Definition Audi`, index 1). A Dogen process started and Windows reported a window titled `Dogen`, but the available window-inspection tool did not return that window as a target. The process was stopped after this attempt.
+- Therefore the maximized and minimum layouts, lower capture HUD, passive Today/Fixes, File actions, dialog backgrounds/logo, live microphone gating, replay/stop, and a second turn after idle **were not manually accepted** in this checkpoint. No screenshots or recordings were captured. Local microphone presence alone does not establish that an audio turn completed, and Ollama model retention was not measured in a live turn.
+- Automated UI and pipeline regression tests passed, including the `keep_alive=-1` call expectation. They do not replace the pending visual and end-to-end checks.
+
 ## Environment
 
 - Operating system: Windows
@@ -63,7 +71,7 @@ LJSpeech loaded in 14.785 seconds and synthesized five fixed sentences in 0.611â
 | Feedback is separate and categorized | passed automatically | parser, database, pipeline, and UI tests |
 | Weekly progress handles empty and legacy data | passed automatically | progress aggregate and UI tests |
 | Ten consecutive manual conversations complete | pending | requires manual use |
-| Automated tests and documentation are current | passed | 91 tests plus README and setup updates |
+| Automated tests and documentation are current | passed | 110 tests in the 2026-09-28 Focus UI checkpoint; README and setup updates predate it |
 
 ## Known limitations
 

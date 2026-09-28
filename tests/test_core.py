@@ -340,14 +340,14 @@ def test_ollama_client_sets_context_window(monkeypatch):
         def __init__(self, host, timeout):
             pass
 
-        def chat(self, model, messages, stream, options=None):
-            calls.append(options)
+        def chat(self, model, messages, stream, options=None, keep_alive=None):
+            calls.append((options, keep_alive))
             return iter([])
 
     monkeypatch.setattr("ollama.Client", FakeOllamaClient)
     client = OllamaClient("http://localhost:11434", "mistral")
     client.generate([], lambda token: None, lambda: False)
-    assert calls == [{"num_ctx": 4096}]
+    assert calls == [({"num_ctx": 4096}, -1)]
 
 
 def test_database_session_per_day(tmp_path):
