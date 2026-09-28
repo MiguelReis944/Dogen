@@ -39,7 +39,11 @@ class PetWidget(QWidget):
             self._phase = 0.0
 
     def set_volume(self, rms: float):
-        self._volume = max(0.0, min(1.0, rms * 6))
+        self._volume = max(0.0, min(1.0, rms * 8))
+
+    @property
+    def visual_volume(self) -> float:
+        return self._volume
 
     def _tick(self):
         self._phase += 0.05

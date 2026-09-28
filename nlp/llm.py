@@ -90,6 +90,7 @@ class OllamaClient:
         # silently truncates history once context_size grows past ~10 turns —
         # the model then "forgets" earlier turns without any error surfacing.
         for item in self.client.chat(model=self.model, messages=messages, stream=True,
+                                     keep_alive=-1,
                                      options={"num_ctx": 4096}):
             if cancelled():
                 break

@@ -37,7 +37,7 @@ FEMALE_VOICE_MODEL = "tts_models/en/ljspeech/tacotron2-DDC"
 _CORRECTION_RE = re.compile(r'(\[[A-Z][^:\[\]\n]*:.*?\])', re.DOTALL)
 
 # How many pixels of RMS maps to 100% on the level meter
-_VOL_SCALE = 300
+_VOL_SCALE = 600
 
 
 def _utc_bounds_for_local_day(local_day: date) -> tuple[str, str]:
@@ -216,7 +216,8 @@ class ConversationWorker(QThread):
         self.status_message.emit(f"Loading {pipeline.llm.model} into RAM...")
         try:
             pipeline.llm.client.generate(
-                model=pipeline.llm.model, prompt="", options={"num_predict": 0}
+                model=pipeline.llm.model, prompt="", options={"num_predict": 0},
+                keep_alive=-1,
             )
         except Exception as exc:
             self.error.emit(f"Could not load {pipeline.llm.model}: {exc}")

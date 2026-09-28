@@ -1,10 +1,22 @@
 import numpy as np
 import pytest
+from unittest.mock import MagicMock
 
-from nlp.llm import ConversationContext
+from nlp.llm import ConversationContext, OllamaClient
 from nlp.feedback import CoachFeedback
 from pipeline import ProcessingPipeline, TurnCancelled, TurnResult, _for_tts, _strip_null_annotations
 from storage.models import TurnMetrics
+
+
+def test_chat_requests_resident_model(monkeypatch):
+    fake_ollama = MagicMock()
+    fake_ollama.chat.return_value = iter(())
+    monkeypatch.setattr("ollama.Client", lambda **kwargs: fake_ollama)
+
+    client = OllamaClient("http://localhost:11434", "mistral")
+    client.generate([], lambda _: None, lambda: False)
+
+    assert fake_ollama.chat.call_args.kwargs["keep_alive"] == -1
 
 
 class FakeTranscriber:

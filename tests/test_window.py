@@ -1,7 +1,7 @@
 import os
 from datetime import date, datetime, time, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -88,6 +88,16 @@ def test_ollama_warmup_failure_keeps_worker_unavailable():
 
     assert not worker._warm_up_llm(pipeline)
     assert errors == ["Could not load missing: model is missing"]
+
+
+def test_ollama_warmup_requests_resident_model():
+    app = QApplication.instance() or QApplication([])
+    client = MagicMock()
+    pipeline = SimpleNamespace(llm=SimpleNamespace(client=client, model="mistral"))
+    worker = ConversationWorker(AppConfig(), ConversationContext(), "mistral")
+
+    assert worker._warm_up_llm(pipeline)
+    assert client.generate.call_args.kwargs["keep_alive"] == -1
 
 
 def test_window_keeps_dogen_name_and_single_record_control(tmp_path):
@@ -368,6 +378,33 @@ def test_response_audio_controls_follow_replay_state(tmp_path):
 
         assert window.replay_response_button.isEnabled()
         assert db.session_stats("session")["turns"] == 1
+        window.close()
+
+
+def test_quiet_speech_has_visible_meter_without_changing_vad(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(vad_threshold=0.02)
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db, config)
+        window._set_capture_state("recording")
+        window._on_volume(0.08)
+        assert window.volume_bar.value() > 40
+        assert config.vad_threshold == 0.02
+        window._set_capture_state("processing")
+        assert window.volume_bar.value() == 0
+        window.close()
+
+
+def test_next_worker_reuses_completed_pipeline(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        pipeline = object()
+        window.worker = SimpleNamespace(built_pipeline=pipeline, isRunning=lambda: False)
+        window._on_finished()
+        with patch.object(ConversationWorker, "start", return_value=None):
+            window.start()
+        assert window.worker._prebuilt_pipeline is pipeline
         window.close()
 
 
