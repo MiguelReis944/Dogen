@@ -4,6 +4,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (QDialog, QDialogButtonBox, QGroupBox,
                               QHBoxLayout, QLabel, QTableWidget,
                               QTableWidgetItem, QVBoxLayout)
+from ui.dogen_logo import add_dialog_header
 
 
 class SessionSummaryDialog(QDialog):
@@ -16,6 +17,7 @@ class SessionSummaryDialog(QDialog):
         self.setMinimumWidth(440)
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
+        add_dialog_header(self, layout, "Session summary")
 
         turns       = stats.get("turns", 0)
         corrections = stats.get("corrections", 0)

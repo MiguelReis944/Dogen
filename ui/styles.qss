@@ -18,6 +18,8 @@
 
 QWidget { background: #0a0e14; color: #d7ffe4; font-size: 13px; }
 QMainWindow { background: #0a0e14; }
+QDialog { background: #0a0e14; color: #d7ffe4; }
+#dialogTitle { color: #7fe3ab; font-size: 20px; font-weight: 600; }
 
 QMenuBar { background: #0a0e14; color: #7fe3ab; border-bottom: 1px solid #1f2a37; }
 QMenuBar::item:selected { background: #142019; }

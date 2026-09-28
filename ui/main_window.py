@@ -11,7 +11,7 @@ from datetime import date, datetime, time as datetime_time, timedelta, timezone
 import numpy as np
 from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt5.QtGui import QKeySequence, QTextCursor
-from PyQt5.QtWidgets import (QAction, QComboBox, QFileDialog, QGroupBox,
+from PyQt5.QtWidgets import (QAction, QFileDialog, QGroupBox,
                               QHBoxLayout, QLabel, QLineEdit, QMainWindow,
                               QProgressBar, QPushButton, QSizePolicy, QSplitter,
                               QStackedWidget, QTextEdit, QVBoxLayout, QWidget)
@@ -389,18 +389,9 @@ class MainWindow(QMainWindow):
         self.config.input_mode = "ptt"
         self.config.tts_model = FEMALE_VOICE_MODEL
 
-        # These selectors remain as non-visual state holders for the File menu.
-        self.model_combo = QComboBox(self)
-        if config.ollama_model:
-            self.model_combo.addItem(config.ollama_model)
-        self.model_combo.setEnabled(False)
-        self.model_combo.currentTextChanged.connect(self._on_model_changed)
-        self.model_combo.hide()
-
-        self.scenario_combo = QComboBox(self)
-        self.scenario_combo.addItems(list(SCENARIOS.keys()))
-        self.scenario_combo.currentTextChanged.connect(self._on_scenario_changed)
-        self.scenario_combo.hide()
+        self._model_names = [config.ollama_model or "mistral"]
+        self._current_model = self._model_names[0]
+        self._selected_scenario = next(iter(SCENARIOS))
 
         self._build_menu()
 
@@ -567,16 +558,17 @@ class MainWindow(QMainWindow):
     def _build_menu(self):
         bar = self.menuBar()
         file_menu = bar.addMenu("File")
+        self.file_menu = file_menu
 
         self.new_session_action = QAction("New session", self)
         self.new_session_action.triggered.connect(self._end_session)
         file_menu.addAction(self.new_session_action)
 
-        self.vocabulary_action = QAction("Vocabulary…", self)
+        self.vocabulary_action = QAction("Vocabulary", self)
         self.vocabulary_action.triggered.connect(self._show_vocab)
         file_menu.addAction(self.vocabulary_action)
 
-        self.progress_action = QAction("Progress…", self)
+        self.progress_action = QAction("Practice progress", self)
         self.progress_action.setObjectName("progressAction")
         self.progress_action.triggered.connect(self._show_progress)
         file_menu.addAction(self.progress_action)
@@ -604,7 +596,7 @@ class MainWindow(QMainWindow):
         for scenario in SCENARIOS:
             action = self.scenario_menu.addAction(scenario)
             action.setCheckable(True)
-            action.setChecked(scenario == self.scenario_combo.currentText())
+            action.setChecked(scenario == self._selected_scenario)
             action.triggered.connect(
                 lambda checked, name=scenario: self._select_scenario(name)
             )
@@ -614,12 +606,12 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
-        self.settings_action = QAction("Settings…", self)
+        self.settings_action = QAction("Settings", self)
         self.settings_action.setShortcut(QKeySequence("Ctrl+,"))
         self.settings_action.triggered.connect(self._open_settings)
         file_menu.addAction(self.settings_action)
 
-        export_action = QAction("Export session…", self)
+        export_action = QAction("Export session", self)
         export_action.setShortcut(QKeySequence("Ctrl+E"))
         export_action.triggered.connect(self._export_session)
         file_menu.addAction(export_action)
@@ -667,23 +659,14 @@ class MainWindow(QMainWindow):
 
     def _restore_model_preference(self):
         saved = self.db.get_setting("last_model")
-        if saved:
-            idx = self.model_combo.findText(saved)
-            if idx >= 0:
-                self.model_combo.setCurrentIndex(idx)
+        if saved in self._model_names:
+            self._current_model = saved
+            self._rebuild_model_menu()
 
     def _on_models_ready(self, names):
-        current = self.model_combo.currentText()
-        self.model_combo.clear()
-        if names:
-            self.model_combo.addItems(names)
-            idx = self.model_combo.findText(current)
-            self.model_combo.setCurrentIndex(max(idx, 0))
-            self.model_combo.setEnabled(True)
-        else:
-            placeholder = current or self.config.ollama_model or "mistral"
-            self.model_combo.addItem(placeholder)
-            self.model_combo.setEnabled(True)
+        self._model_names = names or [self._current_model]
+        if self._current_model not in self._model_names:
+            self._current_model = self._model_names[0]
         self._restore_model_preference()
         self._rebuild_model_menu()
 
@@ -691,33 +674,31 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "model_menu"):
             return
         self.model_menu.clear()
-        current = self.model_combo.currentText()
-        for index in range(self.model_combo.count()):
-            name = self.model_combo.itemText(index)
+        for name in self._model_names:
             action = self.model_menu.addAction(name)
             action.setCheckable(True)
-            action.setChecked(name == current)
+            action.setChecked(name == self._current_model)
             action.triggered.connect(lambda checked, value=name: self._select_model(value))
 
     def _select_model(self, name: str):
-        index = self.model_combo.findText(name)
-        if index >= 0:
-            self.model_combo.setCurrentIndex(index)
-        self._rebuild_model_menu()
+        if name in self._model_names:
+            self._current_model = name
+            self._on_model_changed(name)
+            self._rebuild_model_menu()
 
     def _select_scenario(self, name: str):
-        index = self.scenario_combo.findText(name)
-        if index >= 0:
-            self.scenario_combo.setCurrentIndex(index)
-        for action in self.scenario_menu.actions():
-            action.setChecked(action.text() == name)
+        if name in SCENARIOS:
+            self._selected_scenario = name
+            self._on_scenario_changed(name)
+            for action in self.scenario_menu.actions():
+                action.setChecked(action.text() == name)
 
     def _on_model_changed(self, name):
         if name:
             self.db.set_setting("last_model", name)
 
     def _selected_model(self):
-        return self.model_combo.currentText() or self.config.ollama_model or "mistral"
+        return self._current_model
 
     # ── flow / scenario ────────────────────────────────────────────────────────
 
@@ -731,7 +712,7 @@ class MainWindow(QMainWindow):
         self._render_history()
 
     def _apply_system_prompt(self):
-        scenario = self.scenario_combo.currentText()
+        scenario = self._selected_scenario
         self.context.system_prompt = build_system_prompt(scenario, corrections=self._corrections_on)
 
     # ── stats ──────────────────────────────────────────────────────────────────
@@ -853,8 +834,6 @@ class MainWindow(QMainWindow):
     # ── start / stop ───────────────────────────────────────────────────────────
 
     def _set_configuration_enabled(self, enabled: bool):
-        self.model_combo.setEnabled(enabled)
-        self.scenario_combo.setEnabled(enabled)
         self.model_menu.setEnabled(enabled)
         self.scenario_menu.setEnabled(enabled)
         self.flow_action.setEnabled(enabled)
@@ -1162,7 +1141,7 @@ class MainWindow(QMainWindow):
         )
         if not path:
             return
-        messages = self.db.recent_all_messages(10000)
+        messages = self.db.recent_messages(self.session_id, 10000)
         lines = []
         last_date = None
         for m in messages:

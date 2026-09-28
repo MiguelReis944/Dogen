@@ -193,12 +193,12 @@ def test_file_menu_owns_secondary_actions(tmp_path):
     app = QApplication.instance() or QApplication([])
     with Database(tmp_path / "conversation.db") as db:
         window = _make_window(db)
-        file_menu = window.menuBar().actions()[0].menu()
+        file_menu = window.file_menu
         labels = {action.text() for action in file_menu.actions()}
 
         assert {
-            "New session", "Vocabulary…", "Progress…", "Replay response",
-            "Stop audio", "Settings…", "Export session…", "Exit",
+            "New session", "Vocabulary", "Practice progress", "Replay response",
+            "Stop audio", "Settings", "Export session", "Exit",
         } <= labels
         window.close()
 
@@ -218,8 +218,10 @@ def test_file_menu_owns_model_and_scenario_selection(tmp_path):
             if action.text() == "Job interview"
         ).trigger()
 
-        assert window.model_combo.currentText() == "llama3"
-        assert window.scenario_combo.currentText() == "Job interview"
+        assert window._selected_model() == "llama3"
+        assert window._selected_scenario == "Job interview"
+        assert not hasattr(window, "model_combo")
+        assert not hasattr(window, "scenario_combo")
         window.close()
 
 
@@ -302,14 +304,14 @@ def test_format_message_user_role_no_colors(tmp_path):
         window.close()
 
 
-def test_on_models_ready_populates_combo(tmp_path):
+def test_on_models_ready_populates_menu(tmp_path):
     app = QApplication.instance() or QApplication([])
     with Database(tmp_path / "conversation.db") as db:
         window = _make_window(db)
         window._on_models_ready(["llama3", "mistral", "phi3"])
-        texts = [window.model_combo.itemText(i) for i in range(window.model_combo.count())]
+        texts = [action.text() for action in window.model_menu.actions()]
         assert texts == ["llama3", "mistral", "phi3"]
-        assert window.model_combo.isEnabled()
+        assert window.model_menu.isEnabled()
         window.close()
 
 
@@ -319,8 +321,8 @@ def test_on_models_ready_empty_falls_back_to_config(tmp_path):
         cfg = AppConfig(ollama_model="mistral")
         window = _make_window(db, cfg)
         window._on_models_ready([])
-        assert window.model_combo.currentText() == "mistral"
-        assert window.model_combo.isEnabled()
+        assert window._selected_model() == "mistral"
+        assert window.model_menu.isEnabled()
         window.close()
 
 
@@ -366,6 +368,50 @@ def test_response_audio_controls_follow_replay_state(tmp_path):
 
         assert window.replay_response_button.isEnabled()
         assert db.session_stats("session")["turns"] == 1
+        window.close()
+
+
+def test_file_menu_actions_call_existing_handlers(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    handlers = {
+        "New session": "_end_session",
+        "Export session": "_export_session",
+        "Practice progress": "_show_progress",
+        "Vocabulary": "_show_vocab",
+        "Settings": "_open_settings",
+    }
+    with Database(tmp_path / "conversation.db") as db:
+        with (
+            patch.object(MainWindow, "_fetch_models", return_value=None),
+            patch.object(MainWindow, "_end_session") as new_session,
+            patch.object(MainWindow, "_export_session") as export,
+            patch.object(MainWindow, "_show_progress") as progress,
+            patch.object(MainWindow, "_show_vocab") as vocabulary,
+            patch.object(MainWindow, "_open_settings") as settings,
+        ):
+            window = MainWindow(
+                AppConfig(), db, ConversationContext(), "session",
+                auto_start=False, start_maximized=False,
+            )
+            mocks = dict(zip(handlers, (new_session, export, progress, vocabulary, settings)))
+            for action in window.file_menu.actions():
+                if action.text() in mocks:
+                    action.trigger()
+                    mocks[action.text()].assert_called_once()
+            window.close()
+
+
+def test_export_session_contains_only_current_session(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    target = tmp_path / "session.txt"
+    with Database(tmp_path / "conversation.db") as db:
+        db.add_message("older", "user", "Do not export this", "mistral", 0)
+        db.add_message("session", "user", "Export this", "mistral", 0)
+        window = _make_window(db)
+        with patch("ui.main_window.QFileDialog.getSaveFileName", return_value=(str(target), "")):
+            window._export_session()
+        assert "Export this" in target.read_text(encoding="utf-8")
+        assert "Do not export this" not in target.read_text(encoding="utf-8")
         window.close()
 
 
@@ -603,5 +649,5 @@ def test_main_window_exposes_progress_action(tmp_path):
         window = _make_window(db)
 
         assert window.progress_action.objectName() == "progressAction"
-        assert window.progress_action.text() == "Progress…"
+        assert window.progress_action.text() == "Practice progress"
         window.close()

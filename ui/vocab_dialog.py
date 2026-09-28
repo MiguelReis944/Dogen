@@ -4,6 +4,7 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (QDialog, QHBoxLayout, QHeaderView, QLabel,
                               QPushButton, QTableWidget, QTableWidgetItem,
                               QVBoxLayout)
+from ui.dogen_logo import add_dialog_header
 
 
 class VocabDialog(QDialog):
@@ -14,6 +15,7 @@ class VocabDialog(QDialog):
         self._on_clear = on_clear
 
         layout = QVBoxLayout(self)
+        add_dialog_header(self, layout, "Vocabulary")
 
         if not vocab_items:
             layout.addWidget(QLabel("No corrections recorded yet. Keep practicing!"))

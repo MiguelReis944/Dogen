@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox,
                               QSpinBox, QVBoxLayout)
 
 from utils.config import AppConfig, save_config
+from ui.dogen_logo import add_dialog_header
 
 
 class SettingsDialog(QDialog):
@@ -20,6 +21,7 @@ class SettingsDialog(QDialog):
 
         outer = QVBoxLayout(self)
         outer.setSpacing(10)
+        add_dialog_header(self, outer, "Settings")
 
         # ── Speech Recognition ─────────────────────────────────────────────────
         stt_box = QGroupBox("Speech Recognition (Whisper)")

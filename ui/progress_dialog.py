@@ -12,6 +12,7 @@ from PyQt5.QtWidgets import (
     QTableWidgetItem,
     QVBoxLayout,
 )
+from ui.dogen_logo import add_dialog_header
 
 
 class ProgressDialog(QDialog):
@@ -23,6 +24,7 @@ class ProgressDialog(QDialog):
         self.setMinimumWidth(520)
 
         layout = QVBoxLayout(self)
+        add_dialog_header(self, layout, "Practice progress")
         self.period_combo = QComboBox()
         self.period_combo.addItem("Last 7 days", 7)
         self.period_combo.addItem("Last 30 days", 30)
