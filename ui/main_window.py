@@ -6,7 +6,7 @@ import re
 import threading
 import time
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, time as datetime_time, timedelta, timezone
 
 import numpy as np
 from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
@@ -38,6 +38,18 @@ _CORRECTION_RE = re.compile(r'(\[[A-Z][^:\[\]\n]*:.*?\])', re.DOTALL)
 
 # How many pixels of RMS maps to 100% on the level meter
 _VOL_SCALE = 300
+
+
+def _utc_bounds_for_local_day(local_day: date) -> tuple[str, str]:
+    """Return SQLite-compatible UTC bounds for one local calendar day."""
+    start = datetime.combine(local_day, datetime_time.min).astimezone(timezone.utc)
+    end = datetime.combine(local_day + timedelta(days=1), datetime_time.min).astimezone(
+        timezone.utc
+    )
+    return tuple(
+        value.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+        for value in (start, end)
+    )
 
 
 class ModelFetcher(QThread):
@@ -735,12 +747,12 @@ class MainWindow(QMainWindow):
 
     def _render_today(self):
         today = date.today()
-        today_text = today.isoformat()
         connection = self.db.connection
+        day_start, day_end = _utc_bounds_for_local_day(today)
         turn_sessions = connection.execute(
             "SELECT session_id, COUNT(*), MIN(created_at), MAX(created_at) FROM conversations "
-            "WHERE role='user' AND date(created_at)=? GROUP BY session_id",
-            (today_text,),
+            "WHERE role='user' AND created_at>=? AND created_at<? GROUP BY session_id",
+            (day_start, day_end),
         ).fetchall()
         minutes = sum(
             max(0.0, (datetime.fromisoformat(last) - datetime.fromisoformat(first)).total_seconds())
@@ -750,13 +762,32 @@ class MainWindow(QMainWindow):
         turns = sum(count for _, count, _, _ in turn_sessions)
         words, fillers = connection.execute(
             "SELECT COALESCE(SUM(word_count),0), COALESCE(SUM(filler_count),0) "
-            "FROM turn_metrics WHERE date(created_at)=?",
-            (today_text,),
+            "FROM turn_metrics WHERE created_at>=? AND created_at<?",
+            (day_start, day_end),
         ).fetchone()
         corrections = connection.execute(
-            "SELECT COUNT(*) FROM vocab WHERE date(created_at)=?", (today_text,)
+            "SELECT COUNT(*) FROM feedback WHERE correction IS NOT NULL "
+            "AND TRIM(correction)<>'' AND created_at>=? AND created_at<?",
+            (day_start, day_end),
         ).fetchone()[0]
-        streak = ProgressService(self.db).stats(7, today).current_streak
+        has_activity_today = connection.execute(
+            "SELECT 1 FROM conversations WHERE role='user' AND created_at>=? "
+            "AND created_at<? LIMIT 1",
+            (day_start, day_end),
+        ).fetchone() is not None
+        streak_day = today if has_activity_today else today - timedelta(days=1)
+        streak = 0
+        while True:
+            streak_start, streak_end = _utc_bounds_for_local_day(streak_day)
+            has_activity = connection.execute(
+                "SELECT 1 FROM conversations WHERE role='user' AND created_at>=? "
+                "AND created_at<? LIMIT 1",
+                (streak_start, streak_end),
+            ).fetchone()
+            if has_activity is None:
+                break
+            streak += 1
+            streak_day -= timedelta(days=1)
         fillers_per_100 = float(fillers) * 100 / words if words else None
         filler_text = (
             f"{fillers_per_100:.1f}"

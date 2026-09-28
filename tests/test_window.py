@@ -1,4 +1,5 @@
 import os
+from datetime import date, datetime, time, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -486,6 +487,77 @@ def test_today_shows_passive_activity_metrics_without_action_buttons(tmp_path):
         assert "completed turns: 1" in summary
         assert "fillers / 100 words: 4.0" in summary
         assert "corrections: 1" in summary
+        window.close()
+
+
+def test_today_includes_turns_after_21_local_when_utc_date_has_advanced(tmp_path, monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    local_day = date(2026, 9, 28)
+    sao_paulo_timezone = timezone(-timedelta(hours=3))
+
+    class FixedDate(date):
+        @classmethod
+        def today(cls):
+            return cls(local_day.year, local_day.month, local_day.day)
+
+    class SaoPauloDateTime(datetime):
+        @classmethod
+        def combine(cls, date_value, time_value, tzinfo=None):
+            return datetime.combine(
+                date_value,
+                time_value,
+                tzinfo=tzinfo or sao_paulo_timezone,
+            )
+
+    utc_created_at = datetime.combine(
+        local_day, time(21, 30), tzinfo=sao_paulo_timezone
+    ).astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    assert utc_created_at.startswith("2026-09-29 ")
+
+    with Database(tmp_path / "conversation.db") as db:
+        db.add_completed_turn(
+            "session",
+            "I went home",
+            "What did you do there?",
+            "mistral",
+            100,
+            CoachFeedback(correction="I go → I went", category="verb_tense"),
+            TurnMetrics(4, 0, False, "verb_tense"),
+        )
+        for table in ("conversations", "turn_metrics", "feedback", "vocab"):
+            db.connection.execute(
+                f"UPDATE {table} SET created_at=? WHERE session_id=?",
+                (utc_created_at, "session"),
+            )
+        monkeypatch.setattr("ui.main_window.date", FixedDate)
+        monkeypatch.setattr("ui.main_window.datetime", SaoPauloDateTime)
+        window = _make_window(db)
+
+        summary = window.today.text().lower()
+        assert "completed turns: 1" in summary
+        assert "words spoken: 4" in summary
+        assert "corrections: 1" in summary
+        assert "streak: 1" in summary
+        window.close()
+
+
+def test_today_counts_feedback_correction_without_arrow_or_vocabulary(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        db.add_completed_turn(
+            "session",
+            "I went home",
+            "What did you do there?",
+            "mistral",
+            100,
+            CoachFeedback(correction="Use the past tense here", category="verb_tense"),
+            TurnMetrics(4, 0, False, "verb_tense"),
+        )
+        db.clear_vocab()
+        assert db.get_vocab_for_session("session") == []
+        window = _make_window(db)
+
+        assert "corrections: 1" in window.today.text().lower()
         window.close()
 
 

@@ -24,5 +24,12 @@
 
 ## Preocupações
 
-- Não existe uma API de progresso de um único dia no escopo permitido. Today consulta as tabelas SQLite locais já existentes e usa `ProgressService` para a sequência. A persistência e o esquema não foram alterados; uma API pública de agregados diários pode reduzir o acoplamento da UI ao banco em uma tarefa futura.
+- Não existe uma API de progresso de um único dia no escopo permitido. Today consulta as tabelas SQLite locais já existentes; a sequência também usa esses limites locais. A persistência e o esquema não foram alterados; uma API pública de agregados diários pode reduzir o acoplamento da UI ao banco em uma tarefa futura.
 - A validação visual manual e screenshots descritos no design não foram executados nesta tarefa.
+
+## Follow-up da revisão
+
+- O limite de Today agora é o intervalo UTC semiaberto correspondente à data local (`[início, próximo início)`). Os valores são vinculados como timestamps SQLite sem timezone, compatíveis com `CURRENT_TIMESTAMP`; a sequência usa os mesmos limites locais.
+- A contagem de correções vem de `feedback.correction` não vazio, então inclui texto sem seta e não depende do conteúdo ou da retenção de `vocab`.
+- Testes de regressão simulam 21:30 em São Paulo (00:30 UTC do dia seguinte) e feedback corretivo sem `→`, com o vocabulário vazio.
+- Verificação após o follow-up: `PYTHONPATH=. pytest tests/test_window.py tests/test_progress.py -q` — 37 passaram; `git diff --check` sem erros de whitespace.
