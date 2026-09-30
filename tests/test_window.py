@@ -125,6 +125,20 @@ def test_window_has_stable_minimum_and_capture_hud(tmp_path):
         window.close()
 
 
+def test_main_text_is_larger_and_daily_goal_is_visible(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        with patch("ui.main_window.apply_hud_title_bar") as apply_title_bar:
+            window = _make_window(db)
+        apply_title_bar.assert_called_once_with(window)
+        window.ensurePolished()
+        window.today.ensurePolished()
+        summary = window.today.text().lower()
+        assert window.today.font().pixelSize() >= 15
+        assert "conversation goal: ~0.0 / 15 min" in summary
+        window.close()
+
+
 def test_volume_is_hidden_outside_recording(tmp_path):
     app = QApplication.instance() or QApplication([])
     with Database(tmp_path / "conversation.db") as db:

@@ -16,7 +16,7 @@
 #captureStack { min-height: 28px; }
 #voiceLevel { min-height: 22px; }
 
-QWidget { background: #0a0e14; color: #d7ffe4; font-size: 13px; }
+QWidget { background: #0a0e14; color: #d7ffe4; font-size: 15px; }
 QMainWindow { background: #0a0e14; }
 QDialog { background: #0a0e14; color: #d7ffe4; }
 #dialogTitle { color: #7fe3ab; font-size: 20px; font-weight: 600; }

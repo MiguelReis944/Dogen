@@ -10,7 +10,7 @@ from datetime import date, datetime, time as datetime_time, timedelta, timezone
 
 import numpy as np
 from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
-from PyQt5.QtGui import QKeySequence, QTextCursor
+from PyQt5.QtGui import QFont, QKeySequence, QTextCursor
 from PyQt5.QtWidgets import (QAction, QFileDialog, QGroupBox,
                               QHBoxLayout, QLabel, QLineEdit, QMainWindow,
                               QProgressBar, QPushButton, QSizePolicy, QSplitter,
@@ -31,6 +31,7 @@ from ui.progress_dialog import ProgressDialog
 from ui.session_summary_dialog import SessionSummaryDialog
 from ui.settings_dialog import SettingsDialog
 from ui.vocab_dialog import VocabDialog
+from ui.dogen_logo import apply_hud_title_bar
 
 FEMALE_VOICE_MODEL = "tts_models/en/ljspeech/tacotron2-DDC"
 
@@ -364,6 +365,9 @@ class MainWindow(QMainWindow):
     def __init__(self, config, db, context, session_id, settings_path=None,
                  auto_start=True, start_maximized=True):
         super().__init__()
+        base_font = QFont("Segoe UI")
+        base_font.setPixelSize(15)
+        self.setFont(base_font)
         self.setWindowTitle("Dogen")
         self.setMinimumSize(1100, 700)
         self.resize(1280, 820)
@@ -418,6 +422,7 @@ class MainWindow(QMainWindow):
 
         self.history = QTextEdit()
         self.history.setObjectName("conversationHistory")
+        self.history.setFont(base_font)
         self.history.setReadOnly(True)
         self.history.setPlaceholderText("Your conversation will appear here.")
         content.addWidget(self.history)
@@ -431,7 +436,12 @@ class MainWindow(QMainWindow):
         today_layout = QVBoxLayout(self.today_group)
         self.today = QLabel()
         self.today.setObjectName("todaySummary")
+        self.today.setFont(base_font)
         self.today.setWordWrap(True)
+        self.today.setToolTip(
+            "Daily conversation time is estimated from your first to last completed turn; "
+            "it is not microphone speaking time."
+        )
         today_layout.addWidget(self.today)
         side_layout.addWidget(self.today_group, stretch=1)
 
@@ -531,8 +541,8 @@ class MainWindow(QMainWindow):
             QTextEdit { background: #0B1118; border: 1px solid #263747; padding: 8px; }
             QGroupBox { border: 1px solid #263747; margin-top: 10px; padding-top: 8px; }
             QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 4px; }
-            #statusText { font-size: 13px; }
-            #sessionStats { color: #91A4B7; font-size: 12px; }
+            #statusText { font-size: 15px; }
+            #sessionStats { color: #91A4B7; font-size: 13px; }
             #loadingStatus { color: #91A4B7; padding-left: 8px; }
             #captureHud { background: #111B26; border: 1px solid #263747; border-radius: 6px; }
             #captureStack { min-height: 28px; }
@@ -542,6 +552,7 @@ class MainWindow(QMainWindow):
                             padding: 8px 16px; font-weight: 600; }
             #recordButton:disabled { background: #263747; color: #91A4B7; }
         """)
+        apply_hud_title_bar(self)
         if start_maximized:
             self.setWindowState(self.windowState() | Qt.WindowMaximized)
         if auto_start:
@@ -777,6 +788,7 @@ class MainWindow(QMainWindow):
             else "Not enough data"
         )
         self.today.setText(
+            f"Conversation goal: ~{minutes:.1f} / 15 min\n"
             f"Active minutes: {minutes:.1f}\n"
             f"Words spoken: {words}\n"
             f"Completed turns: {turns}\n"

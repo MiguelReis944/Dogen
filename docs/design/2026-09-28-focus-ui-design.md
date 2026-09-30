@@ -8,8 +8,8 @@ ser informação de apoio, não uma segunda atividade competindo com a conversa.
 
 ## Decisões de produto
 
-- `Today` será um resumo passivo de prática: minutos ativos, palavras faladas,
-  turnos concluídos, fillers por 100 palavras, correções encontradas e sequência.
+- `Today` será um resumo passivo de prática: meta diária aproximada de 15 minutos,
+  palavras faladas, turnos concluídos, fillers por 100 palavras, correções e sequência.
 - `Fixes` será somente leitura. O painel exibirá correção, frase natural e categoria,
   sem campo de resposta, Retry, Explain ou Skip.
 - `Status` deixará de ser um painel independente. Carregamento, pronto, gravação e
@@ -35,6 +35,8 @@ ser informação de apoio, não uma segunda atividade competindo com a conversa.
 
 A janela abrirá maximizada, manterá tamanho mínimo estável e usará limites explícitos
 para a coluna lateral. Textos longos não poderão alterar a largura da janela.
+O texto principal e os estados de captura usarão fonte ampliada. A barra de título
+nativa do Windows seguirá as cores do HUD quando o sistema oferecer essa personalização.
 
 ## Menu File e diálogos
 

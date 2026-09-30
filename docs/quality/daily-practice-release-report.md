@@ -12,6 +12,17 @@
 - Therefore the maximized and minimum layouts, lower capture HUD, passive Today/Fixes, File actions, dialog backgrounds/logo, live microphone gating, replay/stop, and a second turn after idle **were not manually accepted** in this checkpoint. No screenshots or recordings were captured. Local microphone presence alone does not establish that an audio turn completed, and Ollama model retention was not measured in a live turn.
 - Automated UI and pipeline regression tests passed, including the `keep_alive=-1` call expectation. They do not replace the pending visual and end-to-end checks.
 
+## Inline review follow-up — 2026-09-30
+
+- Added an approximate 15-minute conversation goal to Today. Its tooltip discloses
+  that this duration is the span between the first and last completed turn, not
+  measured microphone speaking time.
+- Increased the shared interface font to 15px and applied the same HUD palette to
+  native Windows title bars where the desktop compositor supports it.
+- Focused regression tests cover the goal, font size, and requested title-bar colors.
+- Visual inspection and real Ollama/audio idle-retention checks are still pending;
+  these changes have not been manually accepted in the desktop app.
+
 ## Environment
 
 - Operating system: Windows

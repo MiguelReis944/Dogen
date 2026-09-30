@@ -1,7 +1,10 @@
-from PyQt5.QtWidgets import QApplication
+import ctypes
+import sys
+
+from PyQt5.QtWidgets import QApplication, QDialog, QVBoxLayout
 
 from storage.progress import ProgressStats
-from ui.dogen_logo import DogenLogo
+from ui.dogen_logo import DogenLogo, add_dialog_header
 from ui.progress_dialog import ProgressDialog
 from ui.settings_dialog import SettingsDialog
 from ui.session_summary_dialog import SessionSummaryDialog
@@ -38,3 +41,28 @@ def test_logo_scale_changes_render_size():
     assert logo.sizeHint().height() < original.height()
     assert not logo.grab().isNull()
     logo.close()
+
+
+def test_windows_title_bar_uses_hud_caption_and_text_colors(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    calls = []
+
+    class DwmApi:
+        def DwmSetWindowAttribute(self, hwnd, attribute, value_pointer, size):
+            value = ctypes.cast(value_pointer, ctypes.POINTER(ctypes.c_uint)).contents.value
+            calls.append((attribute, value))
+            return 0
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(ctypes, "WinDLL", lambda _: DwmApi(), raising=False)
+    dialog = QDialog()
+
+    add_dialog_header(dialog, QVBoxLayout(dialog), "Test")
+
+    assert calls == [
+        (20, 1),
+        (34, 0x00473726),
+        (35, 0x00261B11),
+        (36, 0x00F5F1E8),
+    ]
+    dialog.close()
