@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import QApplication, QMessageBox
 
 from nlp.llm import ConversationContext
 from storage.db import Database
+from ui.dogen_logo import dogen_window_icon
 from ui.main_window import MainWindow
 from utils.config import load_config
 
@@ -19,6 +20,7 @@ def main():
     config = load_config(root / "settings.json")
     logging.basicConfig(filename=root / "app.log", level=logging.INFO)
     app = QApplication(sys.argv)
+    app.setWindowIcon(dogen_window_icon())
     try:
         app.setStyleSheet((root / "ui" / "styles.qss").read_text(encoding="utf-8"))
     except FileNotFoundError:

@@ -2,16 +2,67 @@
 
 import ctypes
 import sys
+from functools import lru_cache
 from pathlib import Path
 
-from PyQt5.QtCore import QSize, Qt
-from PyQt5.QtGui import QColor, QPainter, QPalette
+from PyQt5.QtCore import QRectF, QSize, Qt
+from PyQt5.QtGui import QColor, QIcon, QPainter, QPalette, QPixmap
 from PyQt5.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 
 HUD_BACKGROUND = 0x00261B11
 HUD_BORDER = 0x00473726
 HUD_TEXT = 0x00F5F1E8
+
+
+def _paint_dogen_face(painter, rect):
+    painter.save()
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.translate(rect.topLeft())
+    painter.scale(rect.width() / 110, rect.height() / 68)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor("#4ade80"))
+    painter.drawRoundedRect(4, 4, 36, 36, 8, 8)
+    painter.drawRoundedRect(70, 4, 36, 36, 8, 8)
+    painter.setBrush(QColor("#1f6b46"))
+    painter.drawRoundedRect(28, 58, 54, 6, 3, 3)
+    painter.restore()
+
+
+@lru_cache(maxsize=1)
+def dogen_window_icon():
+    """Build multi-resolution window icons from the same vector face as the HUD."""
+    icon = QIcon()
+    for size in (16, 24, 32, 48, 64, 128, 256):
+        pixmap = QPixmap(size, size)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor("#111720"))
+        inset = max(0.5, size * 0.025)
+        painter.drawRoundedRect(
+            QRectF(inset, inset, size - inset * 2, size - inset * 2),
+            size * 0.18,
+            size * 0.18,
+        )
+        face_width = size * 0.82
+        face_height = face_width * 68 / 110
+        face_rect = QRectF(
+            (size - face_width) / 2,
+            (size - face_height) / 2,
+            face_width,
+            face_height,
+        )
+        _paint_dogen_face(painter, face_rect)
+        painter.end()
+        icon.addPixmap(pixmap)
+    return icon
+
+
+def apply_dogen_window_icon(widget):
+    """Set the branded icon on a top-level application window."""
+    widget.setWindowIcon(dogen_window_icon())
 
 
 def apply_hud_title_bar(widget):
@@ -59,14 +110,7 @@ class DogenLogo(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.scale(self.width() / 110, self.height() / 68)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor("#4ade80"))
-        painter.drawRoundedRect(4, 4, 36, 36, 8, 8)
-        painter.drawRoundedRect(70, 4, 36, 36, 8, 8)
-        painter.setBrush(QColor("#1f6b46"))
-        painter.drawRoundedRect(28, 58, 54, 6, 3, 3)
+        _paint_dogen_face(painter, QRectF(0, 0, self.width(), self.height()))
         painter.end()
 
 
@@ -78,6 +122,7 @@ def add_dialog_header(dialog, layout, title: str):
     dialog.setPalette(palette)
     dialog.setAutoFillBackground(True)
     dialog.setStyleSheet(Path(__file__).with_name("styles.qss").read_text(encoding="utf-8"))
+    apply_dogen_window_icon(dialog)
     apply_hud_title_bar(dialog)
 
     header = QHBoxLayout()

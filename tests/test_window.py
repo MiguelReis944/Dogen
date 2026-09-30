@@ -105,6 +105,7 @@ def test_window_keeps_dogen_name_and_single_record_control(tmp_path):
     with Database(tmp_path / "conversation.db") as db:
         window = _make_window(db)
         assert window.windowTitle() == "Dogen"
+        assert not window.windowIcon().isNull()
         assert window.record_button.text() == "Start recording"
         visible_controls = [
             button for button in window.centralWidget().findChildren(QPushButton)

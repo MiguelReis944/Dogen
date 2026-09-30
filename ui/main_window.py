@@ -31,7 +31,7 @@ from ui.progress_dialog import ProgressDialog
 from ui.session_summary_dialog import SessionSummaryDialog
 from ui.settings_dialog import SettingsDialog
 from ui.vocab_dialog import VocabDialog
-from ui.dogen_logo import apply_hud_title_bar
+from ui.dogen_logo import apply_dogen_window_icon, apply_hud_title_bar
 
 FEMALE_VOICE_MODEL = "tts_models/en/ljspeech/tacotron2-DDC"
 
@@ -369,6 +369,7 @@ class MainWindow(QMainWindow):
         base_font.setPixelSize(15)
         self.setFont(base_font)
         self.setWindowTitle("Dogen")
+        apply_dogen_window_icon(self)
         self.setMinimumSize(1100, 700)
         self.resize(1280, 820)
         self.config = config

@@ -82,9 +82,15 @@ QProgressBar::chunk { background: #4ade80; }
 
 QTableWidget {
     background: #0e141b;
+    alternate-background-color: #111720;
     border: 1px solid #1f2a37;
     color: #d7ffe4;
     gridline-color: #1f2a37;
+}
+QTableWidget::item:alternate { background: #111720; }
+QTableWidget::item:selected {
+    background: #1f6b46;
+    color: #f5f1e8;
 }
 QHeaderView::section {
     background: #111720;
@@ -92,6 +98,11 @@ QHeaderView::section {
     border: 0;
     border-bottom: 1px solid #1f2a37;
     padding: 4px;
+}
+QTableCornerButton::section {
+    background: #111720;
+    border: 0;
+    border-bottom: 1px solid #1f2a37;
 }
 
 QGroupBox {
