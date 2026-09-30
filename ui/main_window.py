@@ -577,6 +577,15 @@ class MainWindow(QMainWindow):
         file_menu = bar.addMenu("File")
         self.file_menu = file_menu
 
+        self.loading_menu_action = QAction("Loading local models…", self)
+        self.loading_menu_action.setObjectName("loadingMenuAction")
+        self.loading_menu_action.setEnabled(False)
+        self.loading_menu_action.setVisible(False)
+        self.loading_menu_action.setToolTip(
+            "Model-dependent options will unlock when startup is complete."
+        )
+        file_menu.addAction(self.loading_menu_action)
+
         self.new_session_action = QAction("New session", self)
         self.new_session_action.triggered.connect(self._end_session)
         file_menu.addAction(self.new_session_action)
@@ -902,6 +911,7 @@ class MainWindow(QMainWindow):
         if self.worker and self.worker.isRunning():
             return
         self._set_configuration_enabled(False)
+        self.loading_menu_action.setVisible(True)
         self.replay_response_button.setEnabled(False)
         self.worker = ConversationWorker(
             self.config, self.context, self._selected_model(), self._pipeline, self
@@ -939,6 +949,7 @@ class MainWindow(QMainWindow):
 
     def _on_recording_started(self):
         self._set_configuration_enabled(False)
+        self.loading_menu_action.setVisible(False)
         self._last_error = None
         self._replay_error = None
         self._response_notice = None
@@ -962,6 +973,7 @@ class MainWindow(QMainWindow):
         self._set_status(f"Captured {duration_sec:.1f}s · {stop_reason}")
 
     def _on_waiting_for_ptt(self):
+        self.loading_menu_action.setVisible(False)
         self._set_configuration_enabled(True)
         self._set_capture_state("ready")
         self.pet.set_state("idle")
@@ -1038,6 +1050,7 @@ class MainWindow(QMainWindow):
         self._append(text)
 
     def _on_error(self, text):
+        self.loading_menu_action.setVisible(False)
         if self._assistant_open:
             self._render_history()
         self._last_error = text
@@ -1087,6 +1100,7 @@ class MainWindow(QMainWindow):
             self._set_status(f"Could not save turn: {exc}")
 
     def _on_finished(self):
+        self.loading_menu_action.setVisible(False)
         if self.worker and self.worker.built_pipeline and not self._restart_after_settings:
             self._pipeline = self.worker.built_pipeline
         if self._assistant_open:

@@ -259,6 +259,8 @@ def test_configuration_actions_are_available_only_while_worker_waits_for_recordi
         with patch.object(ConversationWorker, "start", return_value=None):
             window.start()
 
+        assert window.loading_menu_action.isVisible()
+        assert window.loading_menu_action.text() == "Loading local models…"
         assert not window.flow_action.isEnabled()
         assert not window.model_menu.isEnabled()
         assert not window.scenario_menu.isEnabled()
@@ -266,6 +268,7 @@ def test_configuration_actions_are_available_only_while_worker_waits_for_recordi
         assert not window.new_session_action.isEnabled()
 
         window._on_waiting_for_ptt()
+        assert not window.loading_menu_action.isVisible()
         assert window.flow_action.isEnabled()
         assert window.model_menu.isEnabled()
         assert window.scenario_menu.isEnabled()
@@ -284,6 +287,7 @@ def test_configuration_actions_are_available_only_while_worker_waits_for_recordi
         assert window._corrections_on is False
 
         window._on_recording_started()
+        assert not window.loading_menu_action.isVisible()
         assert not window.flow_action.isEnabled()
         assert not window.model_menu.isEnabled()
         assert not window.scenario_menu.isEnabled()
@@ -295,6 +299,22 @@ def test_configuration_actions_are_available_only_while_worker_waits_for_recordi
         assert window.scenario_menu.isEnabled()
         assert window.settings_action.isEnabled()
         assert window.new_session_action.isEnabled()
+        window.close()
+
+
+def test_file_menu_hides_loading_notice_after_startup_error(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+
+        with patch.object(ConversationWorker, "start", return_value=None):
+            window.start()
+
+        assert window.loading_menu_action.isVisible()
+        window._on_error("Could not load local models")
+
+        assert not window.loading_menu_action.isVisible()
+        assert window.status.text() == "Could not load local models"
         window.close()
 
 
