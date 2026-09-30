@@ -2,7 +2,7 @@ import ctypes
 import sys
 
 from PyQt5.QtGui import QPalette
-from PyQt5.QtWidgets import QApplication, QDialog, QTableWidget, QVBoxLayout
+from PyQt5.QtWidgets import QApplication, QDialog, QLabel, QTableWidget, QVBoxLayout
 
 from storage.progress import ProgressStats
 from storage.models import VocabItem
@@ -90,6 +90,14 @@ def test_dialogs_have_dogen_window_icons(tmp_path):
 
     for dialog in dialogs:
         dialog.close()
+
+
+def test_progress_dialog_labels_transcript_derived_word_count(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    dialog = ProgressDialog(EmptyProgress())
+
+    assert "Words transcribed:" in [label.text() for label in dialog.findChildren(QLabel)]
+    dialog.close()
 
 
 def test_windows_title_bar_uses_hud_caption_and_text_colors(monkeypatch):

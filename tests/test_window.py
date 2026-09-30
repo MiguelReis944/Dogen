@@ -18,7 +18,7 @@ from ui.main_window import ConversationWorker, MainWindow
 from ui.session_summary_dialog import SessionSummaryDialog
 from ui.progress_dialog import ProgressDialog
 from ui.settings_dialog import SettingsDialog
-from utils.config import AppConfig
+from utils.config import AppConfig, load_config
 
 
 def _make_window(db, cfg=None, session="session"):
@@ -137,7 +137,7 @@ def test_main_text_is_larger_and_daily_goal_is_visible(tmp_path):
         window.today.ensurePolished()
         summary = window.today.text().lower()
         assert window.today.font().pixelSize() >= 15
-        assert "recording goal: 0.0 / 15 min" in summary
+        assert "recorded audio: 0.0 / 15 min" in summary
         window.close()
 
 
@@ -492,6 +492,21 @@ def test_settings_persists_click_controlled_recording(tmp_path):
     dialog.close()
 
 
+def test_settings_persists_daily_recording_goal(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    config_path = tmp_path / "settings.json"
+    config = AppConfig()
+    dialog = SettingsDialog(config, config_path)
+
+    assert dialog._daily_goal.value() == 15
+    dialog._daily_goal.setValue(25)
+    dialog._save()
+
+    assert config.daily_recording_goal_minutes == 25
+    assert load_config(config_path).daily_recording_goal_minutes == 25
+    dialog.close()
+
+
 def test_response_audio_controls_follow_replay_state(tmp_path):
     app = QApplication.instance() or QApplication([])
     with Database(tmp_path / "conversation.db") as db:
@@ -755,16 +770,16 @@ def test_today_shows_passive_activity_metrics_without_action_buttons(tmp_path):
 
         summary = window.today.text().lower()
         assert not window.today.findChildren(QPushButton)
-        assert "recorded minutes" in summary
-        assert "words spoken" in summary
+        assert "recorded audio: 0.0 / 15 min" in summary
+        assert "words transcribed" in summary
         assert "completed turns" in summary
-        assert "fillers / 100 words" in summary
-        assert "corrections" in summary
-        assert "streak" in summary
-        assert "words spoken: 50" in summary
+        assert "fillers / 100 transcribed words" in summary
+        assert "coach corrections" in summary
+        assert "practice streak" in summary
+        assert "words transcribed: 50" in summary
         assert "completed turns: 1" in summary
-        assert "fillers / 100 words: 4.0" in summary
-        assert "corrections: 1" in summary
+        assert "fillers / 100 transcribed words: 4.0" in summary
+        assert "coach corrections: 1" in summary
         window.close()
 
 
@@ -781,9 +796,38 @@ def test_today_counts_only_microphone_recording_time(tmp_path):
         window = _make_window(db)
 
         summary = window.today.text().lower()
-        assert "recorded minutes: 1.5" in summary
-        assert "recording goal: 1.5 / 15 min" in summary
+        assert "recorded audio: 1.5 / 15 min" in summary
         assert "120" not in summary
+        window.close()
+
+
+def test_today_uses_configured_recording_goal(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        db.add_recording_duration("session", 90.0)
+        window = _make_window(db, AppConfig(daily_recording_goal_minutes=25))
+
+        assert "Recorded audio: 1.5 / 25 min" in window.today.text()
+        window.close()
+
+
+def test_today_refreshes_after_settings_goal_changes(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        db.add_recording_duration("session", 60.0)
+        config = AppConfig()
+        window = _make_window(db, config)
+        dialog = MagicMock()
+
+        def accept_new_goal():
+            config.daily_recording_goal_minutes = 30
+            return 1
+
+        dialog.exec_.side_effect = accept_new_goal
+        with patch("ui.main_window.SettingsDialog", return_value=dialog):
+            window._open_settings()
+
+        assert "Recorded audio: 1.0 / 30 min" in window.today.text()
         window.close()
 
 
@@ -832,9 +876,9 @@ def test_today_includes_turns_after_21_local_when_utc_date_has_advanced(tmp_path
 
         summary = window.today.text().lower()
         assert "completed turns: 1" in summary
-        assert "words spoken: 4" in summary
-        assert "corrections: 1" in summary
-        assert "streak: 1" in summary
+        assert "words transcribed: 4" in summary
+        assert "coach corrections: 1" in summary
+        assert "practice streak: 1" in summary
         window.close()
 
 
@@ -854,7 +898,37 @@ def test_today_counts_feedback_correction_without_arrow_or_vocabulary(tmp_path):
         assert db.get_vocab_for_session("session") == []
         window = _make_window(db)
 
-        assert "corrections: 1" in window.today.text().lower()
+        assert "coach corrections: 1" in window.today.text().lower()
+        window.close()
+
+
+def test_today_counts_legacy_correction_once_when_also_structured(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        db.add_turn(
+            "session",
+            "I goed home",
+            "Try the past tense. [Correction: I goed home → I went home]",
+            "mistral",
+            100,
+        )
+        window = _make_window(db)
+
+        assert "Coach corrections: 1" in window.today.text()
+        window.close()
+
+
+def test_today_counts_correction_from_legacy_assistant_annotation(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        db.connection.execute(
+            "INSERT INTO conversations(session_id,role,content) VALUES(?,?,?)",
+            ("old-session", "assistant", "Try the past tense. "
+             "[Correction: I goed home → I went home]"),
+        )
+        window = _make_window(db)
+
+        assert "Coach corrections: 1" in window.today.text()
         window.close()
 
 

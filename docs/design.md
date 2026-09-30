@@ -10,7 +10,9 @@ a transcrição antes do envio. Depois pode ouvir novamente ou parar o áudio.
 
 O painel principal mostra conversa; `Fixes` separa correções e frases alternativas;
 `Status` mostra carregamento e estágio. `File` concentra cenário, modelo e progresso;
-`Settings` contém revisão de transcrição e opções de captura.
+`Settings` contém revisão de transcrição, opções de captura e a meta de gravação diária
+exibida em Today (15 minutos por padrão). Today mostra o tempo de áudio capturado numa
+única linha; contagens de palavras e fillers são descritas como transcritas/estimadas.
 
 ## Linguagem visual
 

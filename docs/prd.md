@@ -18,6 +18,8 @@ persiste o histórico em SQLite.
 - Responder em inglês com correções e sugestões de frase separadas do diálogo.
 - Restaurar a sessão do dia e oferecer replay/stop sem criar turnos extras.
 - Mostrar progresso sem chamar atividade de proficiência ou inventar nota de pronúncia.
+- Permitir configurar a meta diária de gravação, com padrão de 15 minutos e persistência
+  local em `settings.json`.
 
 ## Critérios de aceitação e evidências
 

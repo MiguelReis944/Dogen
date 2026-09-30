@@ -13,7 +13,7 @@ class ProgressStats:
     current_streak: int
     minutes_practiced: float
     completed_turns: int
-    words_spoken: int
+    words_transcribed: int
     fillers_per_100_words: float | None
     transcript_edit_rate: float | None
     corrections_by_category: dict[str, int]
@@ -34,9 +34,14 @@ class ProgressService:
 
         activity = connection.execute(
             "SELECT created_at FROM conversations "
-            "WHERE role='user' AND is_complete=1 AND created_at>=? AND created_at<?",
+            "WHERE role='user' AND created_at>=? AND created_at<?",
             (start, end),
         ).fetchall()
+        completed_turns = connection.execute(
+            "SELECT COUNT(*) FROM conversations "
+            "WHERE role='user' AND is_complete=1 AND created_at>=? AND created_at<?",
+            (start, end),
+        ).fetchone()[0]
         practiced_days = len({_local_date(row[0]) for row in activity if row[0]})
         metric_totals = connection.execute(
             "SELECT COUNT(*), COALESCE(SUM(word_count),0), COALESCE(SUM(filler_count),0), "
@@ -65,8 +70,8 @@ class ProgressService:
             practiced_days=practiced_days,
             current_streak=self._current_streak(today),
             minutes_practiced=self._practice_minutes(cutoff, today.isoformat()),
-            completed_turns=len(activity),
-            words_spoken=words,
+            completed_turns=int(completed_turns or 0),
+            words_transcribed=words,
             fillers_per_100_words=fillers_per_100,
             transcript_edit_rate=edit_rate,
             corrections_by_category={category: count for category, count in category_rows},
@@ -76,7 +81,7 @@ class ProgressService:
     def _current_streak(self, today: date) -> int:
         rows = self.database.connection.execute(
             "SELECT DISTINCT created_at FROM conversations "
-            "WHERE role='user' AND is_complete=1",
+            "WHERE role='user'",
         ).fetchall()
         days = sorted({_local_date(row[0]) for row in rows if row[0]}, reverse=True)
         days = [day for day in days if day <= today]

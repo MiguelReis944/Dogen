@@ -41,7 +41,7 @@ def test_progress_counts_activity_and_objective_rates(tmp_path):
     assert stats.practiced_days == 1
     assert stats.current_streak == 1
     assert stats.completed_turns == 2
-    assert stats.words_spoken == 20
+    assert stats.words_transcribed == 20
     assert stats.fillers_per_100_words == 10.0
     assert stats.transcript_edit_rate == 0.5
     assert stats.corrections_by_category == {"grammar": 1}
@@ -63,9 +63,27 @@ def test_progress_legacy_turns_count_without_inventing_rates(tmp_path):
         stats = ProgressService(db).stats(7, date(2026, 9, 26))
 
     assert stats.completed_turns == 1
-    assert stats.words_spoken == 0
+    assert stats.words_transcribed == 0
     assert stats.fillers_per_100_words is None
     assert stats.transcript_edit_rate is None
+
+
+def test_interrupted_attempt_counts_as_practice_day_but_not_completed_turn(tmp_path):
+    with Database(tmp_path / "db.sqlite") as db:
+        db.connection.executemany(
+            "INSERT INTO conversations(session_id,created_at,role,content,is_complete) "
+            "VALUES(?,?,?,?,0)",
+            [
+                ("partial", "2026-09-26 12:00:00", "user", "Hello"),
+                ("partial", "2026-09-26 12:00:00", "assistant", "Hi"),
+            ],
+        )
+        stats = ProgressService(db).stats(7, date(2026, 9, 26))
+
+    assert stats.practiced_days == 1
+    assert stats.current_streak == 1
+    assert stats.completed_turns == 0
+    assert stats.words_transcribed == 0
 
 
 def test_progress_period_excludes_older_activity(tmp_path):
@@ -76,6 +94,6 @@ def test_progress_period_excludes_older_activity(tmp_path):
         monthly = ProgressService(db).stats(30, date(2026, 9, 26))
 
     assert weekly.completed_turns == 1
-    assert weekly.words_spoken == 3
+    assert weekly.words_transcribed == 3
     assert monthly.completed_turns == 2
-    assert monthly.words_spoken == 12
+    assert monthly.words_transcribed == 12

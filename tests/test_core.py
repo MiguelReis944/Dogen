@@ -225,6 +225,18 @@ def test_config_round_trip(tmp_path):
     assert load_config(path).ollama_model == "custom"
 
 
+def test_daily_recording_goal_defaults_for_old_settings_and_round_trips(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text('{"context_size": 20}')
+
+    config = load_config(path)
+    assert config.daily_recording_goal_minutes == 15
+
+    config.daily_recording_goal_minutes = 25
+    save_config(config, path)
+    assert load_config(path).daily_recording_goal_minutes == 25
+
+
 def test_fresh_config_uses_safe_push_to_talk_defaults():
     config = AppConfig()
 

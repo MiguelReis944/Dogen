@@ -442,8 +442,10 @@ class MainWindow(QMainWindow):
         self.today.setFont(base_font)
         self.today.setWordWrap(True)
         self.today.setToolTip(
-            "Counts captured microphone audio only. Older sessions have no recorded duration "
-            "and are not estimated from the time between turns."
+            "Recorded time is captured microphone audio (including silence while recording). "
+            "Words and fillers are estimated from the final transcript, which may be edited. "
+            "Coach corrections are explicit feedback; a practice streak counts a user attempt, "
+            "even if the model response was interrupted. Older sessions have no recorded duration."
         )
         today_layout.addWidget(self.today)
         side_layout.addWidget(self.today_group, stretch=1)
@@ -769,11 +771,7 @@ class MainWindow(QMainWindow):
             "FROM turn_metrics WHERE created_at>=? AND created_at<?",
             (day_start, day_end),
         ).fetchone()
-        corrections = connection.execute(
-            "SELECT COUNT(*) FROM feedback WHERE correction IS NOT NULL "
-            "AND TRIM(correction)<>'' AND created_at>=? AND created_at<?",
-            (day_start, day_end),
-        ).fetchone()[0]
+        corrections = self.db.correction_count_between(day_start, day_end)
         has_activity_today = connection.execute(
             "SELECT 1 FROM conversations WHERE role='user' AND created_at>=? "
             "AND created_at<? LIMIT 1",
@@ -799,13 +797,13 @@ class MainWindow(QMainWindow):
             else "Not enough data"
         )
         self.today.setText(
-            f"Recording goal: {minutes:.1f} / 15 min\n"
-            f"Recorded minutes: {minutes:.1f}\n"
-            f"Words spoken: {words}\n"
+            f"Recorded audio: {minutes:.1f} / "
+            f"{self.config.daily_recording_goal_minutes} min\n"
+            f"Words transcribed: {words}\n"
             f"Completed turns: {turns}\n"
-            f"Fillers / 100 words: {filler_text}\n"
-            f"Corrections: {corrections}\n"
-            f"Streak: {streak}"
+            f"Fillers / 100 transcribed words: {filler_text}\n"
+            f"Coach corrections: {corrections}\n"
+            f"Practice streak: {streak}"
         )
 
     # ── history rendering ──────────────────────────────────────────────────────
@@ -1174,6 +1172,7 @@ class MainWindow(QMainWindow):
         dlg = SettingsDialog(self.config, path, parent=self)
         if dlg.exec_():
             self.context.max_history = self.config.context_size
+            self._render_today()
             self._pipeline = None
             if self.worker and self.worker.isRunning():
                 # Recorder and models are owned by the worker; restart it between turns

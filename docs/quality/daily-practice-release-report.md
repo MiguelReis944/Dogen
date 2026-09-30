@@ -36,6 +36,18 @@
 - Partial model streams remain visible and persisted as interrupted messages, but do not
   enter future LLM context or count as completed turns. A TTS/playback failure no longer
   discards a successfully generated text response.
+
+## Today metrics and settings follow-up — 2026-09-30
+
+- The daily captured-audio goal is configurable in Settings and defaults to 15 minutes;
+  legacy `settings.json` files receive the default without migration.
+- Today now presents captured audio once, as progress toward the configured goal. Word
+  and filler counts are labeled as transcript-derived, coach corrections are distinguished
+  from all learner errors, and the practice-streak tooltip explains interrupted attempts.
+- Today includes corrections recovered from legacy assistant annotations without counting
+  the same structured feedback twice.
+- Today and Practice progress use the same attempt-based practice-day/streak definition;
+  completed-turn totals still exclude interrupted responses.
 - Windows startup now sets a Dogen AppUserModelID before creating the Qt application.
   The automated API-call test passes; the taskbar icon still needs visual confirmation
   after restarting the app on Windows.

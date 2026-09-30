@@ -225,6 +225,32 @@ class Database:
         ).fetchone()
         return float(row[0] or 0)
 
+    def correction_count_between(self, start: str, end: str) -> int:
+        """Count explicit coach corrections, including legacy annotated replies once."""
+        structured_rows = self.connection.execute(
+            "SELECT correction FROM feedback WHERE correction IS NOT NULL "
+            "AND TRIM(correction)<>'' AND created_at>=? AND created_at<?",
+            (start, end),
+        ).fetchall()
+        persisted = Counter(row[0].strip() for row in structured_rows)
+        count = sum(persisted.values())
+
+        legacy_rows = self.connection.execute(
+            "SELECT content FROM conversations WHERE role='assistant' "
+            "AND created_at>=? AND created_at<?",
+            (start, end),
+        ).fetchall()
+        for (content,) in legacy_rows:
+            correction = parse_reply(content).feedback.correction
+            if not correction:
+                continue
+            correction = correction.strip()
+            if persisted[correction]:
+                persisted[correction] -= 1
+            else:
+                count += 1
+        return count
+
     # ── settings ───────────────────────────────────────────────────────────────
 
     def set_setting(self, key: str, value: str):

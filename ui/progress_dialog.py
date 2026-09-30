@@ -45,6 +45,12 @@ class ProgressDialog(QDialog):
         self.fillers_label = QLabel()
         self.edits_label = QLabel()
         self.vocabulary_label = QLabel()
+        self.words_label.setToolTip(
+            "Counted from the final transcript sent to the coach, which may have been edited."
+        )
+        self.fillers_label.setToolTip(
+            "Estimated from the final transcript; recognition errors can affect this count."
+        )
         self.edits_label.setToolTip(
             "Transcripts you changed before sending. This measures recognition reliability, "
             "not language proficiency."
@@ -53,8 +59,8 @@ class ProgressDialog(QDialog):
         form.addRow("Practice days:", self.days_label)
         form.addRow(self.practice_time_label, self.practice_label)
         form.addRow("Completed turns:", self.turns_label)
-        form.addRow("Words spoken:", self.words_label)
-        form.addRow("Fillers / 100 words:", self.fillers_label)
+        form.addRow("Words transcribed:", self.words_label)
+        form.addRow("Fillers / 100 transcribed words:", self.fillers_label)
         form.addRow("Transcripts you edited:", self.edits_label)
         form.addRow("Vocabulary encountered:", self.vocabulary_label)
         layout.addLayout(form)
@@ -87,7 +93,7 @@ class ProgressDialog(QDialog):
         self.days_label.setText(str(stats.practiced_days))
         self.practice_label.setText(f"{stats.minutes_practiced:.1f} minutes")
         self.turns_label.setText(str(stats.completed_turns))
-        self.words_label.setText(str(stats.words_spoken))
+        self.words_label.setText(str(stats.words_transcribed))
         self.fillers_label.setText(
             "Not enough data"
             if stats.fillers_per_100_words is None

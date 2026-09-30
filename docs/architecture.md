@@ -13,13 +13,16 @@ Um turno completo grava mensagens, feedback estruturado e métricas em
 `conversations.db`, e mantém até dez pares de contexto, conforme `context_size`.
 Áudio capturado é registrado separadamente para medir tempo de microfone sem incluir
 intervalos ou processamento. Respostas de streaming interrompidas ficam marcadas no
-histórico, mas são excluídas da restauração do contexto e dos turnos concluídos.
+histórico, mas são excluídas da restauração do contexto e dos turnos concluídos. Dias e
+streaks de prática contam tentativas do usuário; `completed_turns` continua contando
+somente respostas completas.
 
 ## Interfaces
 
 As interfaces são sinais PyQt5, callbacks de cancelamento, `settings.json`, SQLite e
-as APIs locais do Whisper, Ollama e Coqui. Não há serviço remoto necessário para o
-fluxo de produto.
+as APIs locais do Whisper, Ollama e Coqui. `daily_recording_goal_minutes` configura a
+meta do Today, com padrão de 15 minutos para arquivos de configuração existentes. Não há
+serviço remoto necessário para o fluxo de produto.
 
 ## Decisões técnicas vigentes
 

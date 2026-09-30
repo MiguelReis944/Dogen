@@ -66,6 +66,17 @@ class SettingsDialog(QDialog):
         form3.addRow("Context turns kept:", self._context_size)
         outer.addWidget(ctx_box)
 
+        # ── daily practice goal ────────────────────────────────────────────────
+        goal_box = QGroupBox("Today")
+        goal_form = QFormLayout(goal_box)
+        self._daily_goal = QSpinBox()
+        self._daily_goal.setObjectName("dailyRecordingGoalMinutes")
+        self._daily_goal.setRange(1, 180)
+        self._daily_goal.setSuffix(" min")
+        self._daily_goal.setValue(config.daily_recording_goal_minutes)
+        goal_form.addRow("Recording goal:", self._daily_goal)
+        outer.addWidget(goal_box)
+
         # ── Buttons ────────────────────────────────────────────────────────────
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btns.accepted.connect(self._save)
@@ -79,5 +90,6 @@ class SettingsDialog(QDialog):
         self.config.vad_threshold       = self._threshold.value()
         self.config.input_mode          = "ptt"
         self.config.context_size        = self._context_size.value()
+        self.config.daily_recording_goal_minutes = self._daily_goal.value()
         save_config(self.config, self.settings_path)
         self.accept()
