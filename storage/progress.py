@@ -1,7 +1,7 @@
 """Read-only progress aggregates derived from local Dogen data."""
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 
 from storage.db import Database
 
@@ -27,29 +27,32 @@ class ProgressService:
     def stats(self, period_days: int, today: date) -> ProgressStats:
         if period_days not in {7, 30}:
             raise ValueError("period_days must be 7 or 30")
-        cutoff = (today - timedelta(days=period_days - 1)).isoformat()
+        cutoff_day = today - timedelta(days=period_days - 1)
+        cutoff = cutoff_day.isoformat()
+        start, end = _utc_bounds(cutoff_day, today + timedelta(days=1))
         connection = self.database.connection
 
         activity = connection.execute(
-            "SELECT COUNT(DISTINCT date(created_at)), COUNT(*) FROM conversations "
-            "WHERE role='user' AND date(created_at) BETWEEN ? AND ?",
-            (cutoff, today.isoformat()),
-        ).fetchone()
+            "SELECT created_at FROM conversations "
+            "WHERE role='user' AND is_complete=1 AND created_at>=? AND created_at<?",
+            (start, end),
+        ).fetchall()
+        practiced_days = len({_local_date(row[0]) for row in activity if row[0]})
         metric_totals = connection.execute(
             "SELECT COUNT(*), COALESCE(SUM(word_count),0), COALESCE(SUM(filler_count),0), "
             "COALESCE(SUM(transcript_edited),0) FROM turn_metrics "
-            "WHERE date(created_at) BETWEEN ? AND ?",
-            (cutoff, today.isoformat()),
+            "WHERE created_at>=? AND created_at<?",
+            (start, end),
         ).fetchone()
         category_rows = connection.execute(
             "SELECT correction_category, COUNT(*) FROM turn_metrics "
             "WHERE correction_category IS NOT NULL "
-            "AND date(created_at) BETWEEN ? AND ? GROUP BY correction_category",
-            (cutoff, today.isoformat()),
+            "AND created_at>=? AND created_at<? GROUP BY correction_category",
+            (start, end),
         ).fetchall()
         vocabulary_count = connection.execute(
-            "SELECT COUNT(*) FROM vocab WHERE date(created_at) BETWEEN ? AND ?",
-            (cutoff, today.isoformat()),
+            "SELECT COUNT(*) FROM vocab WHERE created_at>=? AND created_at<?",
+            (start, end),
         ).fetchone()[0]
 
         words = int(metric_totals[1] or 0)
@@ -59,10 +62,10 @@ class ProgressService:
 
         return ProgressStats(
             period_days=period_days,
-            practiced_days=int(activity[0] or 0),
+            practiced_days=practiced_days,
             current_streak=self._current_streak(today),
             minutes_practiced=self._practice_minutes(cutoff, today.isoformat()),
-            completed_turns=int(activity[1] or 0),
+            completed_turns=len(activity),
             words_spoken=words,
             fillers_per_100_words=fillers_per_100,
             transcript_edit_rate=edit_rate,
@@ -72,11 +75,11 @@ class ProgressService:
 
     def _current_streak(self, today: date) -> int:
         rows = self.database.connection.execute(
-            "SELECT DISTINCT date(created_at) FROM conversations "
-            "WHERE role='user' AND date(created_at) <= ? ORDER BY date(created_at) DESC",
-            (today.isoformat(),),
+            "SELECT DISTINCT created_at FROM conversations "
+            "WHERE role='user' AND is_complete=1",
         ).fetchall()
-        days = [date.fromisoformat(row[0]) for row in rows]
+        days = sorted({_local_date(row[0]) for row in rows if row[0]}, reverse=True)
+        days = [day for day in days if day <= today]
         if not days or days[0] < today - timedelta(days=1):
             return 0
         expected = days[0]
@@ -89,16 +92,29 @@ class ProgressService:
         return streak
 
     def _practice_minutes(self, cutoff: str, through: str) -> float:
-        rows = self.database.connection.execute(
-            "SELECT session_id, MIN(created_at), MAX(created_at) FROM conversations "
-            "WHERE role='user' AND date(created_at) BETWEEN ? AND ? GROUP BY session_id",
-            (cutoff, through),
-        ).fetchall()
-        seconds = 0.0
-        for _, first, last in rows:
-            if first and last:
-                seconds += max(
-                    0.0,
-                    (datetime.fromisoformat(last) - datetime.fromisoformat(first)).total_seconds(),
-                )
-        return seconds / 60
+        start, end = _utc_bounds(
+            date.fromisoformat(cutoff),
+            date.fromisoformat(through) + timedelta(days=1),
+        )
+        seconds = self.database.connection.execute(
+            "SELECT COALESCE(SUM(duration_sec),0) FROM recordings "
+            "WHERE created_at>=? AND created_at<?",
+            (start, end),
+        ).fetchone()[0]
+        return float(seconds or 0) / 60
+
+
+def _utc_bounds(first_day: date, end_day: date) -> tuple[str, str]:
+    start = datetime.combine(first_day, time.min).astimezone(timezone.utc)
+    end = datetime.combine(end_day, time.min).astimezone(timezone.utc)
+    return tuple(
+        value.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+        for value in (start, end)
+    )
+
+
+def _local_date(created_at: str) -> date:
+    value = datetime.fromisoformat(created_at)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone().date()

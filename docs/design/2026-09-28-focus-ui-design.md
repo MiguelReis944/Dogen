@@ -8,8 +8,10 @@ ser informação de apoio, não uma segunda atividade competindo com a conversa.
 
 ## Decisões de produto
 
-- `Today` será um resumo passivo de prática: meta diária aproximada de 15 minutos,
-  palavras faladas, turnos concluídos, fillers por 100 palavras, correções e sequência.
+- `Today` será um resumo passivo de prática: meta diária de 15 minutos baseada no áudio
+  realmente capturado, palavras faladas, turnos concluídos, fillers por 100 palavras,
+  correções e sequência. Pausas e processamento não contam; sessões antigas sem duração
+  gravada não recebem estimativa retroativa.
 - `Fixes` será somente leitura. O painel exibirá correção, frase natural e categoria,
   sem campo de resposta, Retry, Explain ou Skip.
 - `Status` deixará de ser um painel independente. Carregamento, pronto, gravação e

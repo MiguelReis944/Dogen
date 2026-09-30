@@ -10,16 +10,18 @@ from PyQt5.QtWidgets import QApplication, QMessageBox
 
 from nlp.llm import ConversationContext
 from storage.db import Database
-from ui.dogen_logo import dogen_window_icon
+from ui.dogen_logo import dogen_window_icon, set_windows_app_user_model_id
 from ui.main_window import MainWindow
 from utils.config import load_config
 
 
 def main():
+    set_windows_app_user_model_id()
     root = Path(__file__).resolve().parent
     config = load_config(root / "settings.json")
     logging.basicConfig(filename=root / "app.log", level=logging.INFO)
     app = QApplication(sys.argv)
+    app.setApplicationName("Dogen")
     app.setWindowIcon(dogen_window_icon())
     try:
         app.setStyleSheet((root / "ui" / "styles.qss").read_text(encoding="utf-8"))
@@ -40,7 +42,7 @@ def main():
                 session_id = str(uuid.uuid4())
                 db.set_setting("session_date", today)
             context = ConversationContext(config.context_size, config.system_prompt)
-            for message in db.recent_messages(session_id, 2 * config.context_size):
+            for message in db.recent_context_messages(session_id, 2 * config.context_size):
                 context.add_message(message.role, message.content)
             window = MainWindow(config, db, context, session_id,
                                 settings_path=root / "settings.json")

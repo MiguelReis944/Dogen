@@ -23,6 +23,25 @@
 - Visual inspection and real Ollama/audio idle-retention checks are still pending;
   these changes have not been manually accepted in the desktop app.
 
+## Runtime bug-fix follow-up — 2026-09-30
+
+- Today and Practice progress now sum captured PCM frames only; the wait between turns
+  and model processing are excluded. Existing conversations are preserved, but their
+  duration cannot be reconstructed and is not backfilled.
+- File actions that affect session/configuration are enabled while the worker is idle
+  between recordings and locked during capture/processing. Settings restart the worker
+  between turns so changes actually reach the recorder and models.
+- Structured feedback is recovered from legacy assistant messages. The empty Fixes
+  panel now says when no correction was recorded.
+- Partial model streams remain visible and persisted as interrupted messages, but do not
+  enter future LLM context or count as completed turns. A TTS/playback failure no longer
+  discards a successfully generated text response.
+- Windows startup now sets a Dogen AppUserModelID before creating the Qt application.
+  The automated API-call test passes; the taskbar icon still needs visual confirmation
+  after restarting the app on Windows.
+- Verification: `python -m pytest -q` — 131 passed; `git diff --check` — no whitespace
+  errors.
+
 ## Environment
 
 - Operating system: Windows
@@ -87,7 +106,7 @@ LJSpeech loaded in 14.785 seconds and synthesized five fixed sentences in 0.611�
 ## Known limitations
 
 - The formal transcription comparison remains pending until the same private recordings are run through all four model/denoise combinations.
-- Practice time is the interval between the first and last completed turn in each session; a one-turn session contributes zero measured minutes.
+- Legacy sessions have no captured-frame duration and therefore contribute zero recorded minutes; no elapsed-turn estimate is substituted.
 - Legacy turns count as activity but cannot produce word, filler, or transcript-edit rates.
 - Replay is available from the File menu while click-controlled recording is idle.
 

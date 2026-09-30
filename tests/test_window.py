@@ -15,6 +15,7 @@ from storage.db import Database
 from storage.models import TurnMetrics
 from storage.progress import ProgressStats
 from ui.main_window import ConversationWorker, MainWindow
+from ui.session_summary_dialog import SessionSummaryDialog
 from ui.progress_dialog import ProgressDialog
 from ui.settings_dialog import SettingsDialog
 from utils.config import AppConfig
@@ -136,7 +137,7 @@ def test_main_text_is_larger_and_daily_goal_is_visible(tmp_path):
         window.today.ensurePolished()
         summary = window.today.text().lower()
         assert window.today.font().pixelSize() >= 15
-        assert "conversation goal: ~0.0 / 15 min" in summary
+        assert "recording goal: 0.0 / 15 min" in summary
         window.close()
 
 
@@ -250,7 +251,7 @@ def test_file_menu_owns_model_and_scenario_selection(tmp_path):
         window.close()
 
 
-def test_configuration_actions_are_locked_while_worker_runs(tmp_path):
+def test_configuration_actions_are_available_only_while_worker_waits_for_recording(tmp_path):
     app = QApplication.instance() or QApplication([])
     with Database(tmp_path / "conversation.db") as db:
         window = _make_window(db)
@@ -262,13 +263,130 @@ def test_configuration_actions_are_locked_while_worker_runs(tmp_path):
         assert not window.model_menu.isEnabled()
         assert not window.scenario_menu.isEnabled()
         assert not window.settings_action.isEnabled()
+        assert not window.new_session_action.isEnabled()
+
+        window._on_waiting_for_ptt()
+        assert window.flow_action.isEnabled()
+        assert window.model_menu.isEnabled()
+        assert window.scenario_menu.isEnabled()
+        assert window.settings_action.isEnabled()
+        assert window.new_session_action.isEnabled()
+
+        window._on_models_ready(["mistral", "llama3"])
+        next(action for action in window.model_menu.actions() if action.text() == "llama3").trigger()
+        next(
+            action for action in window.scenario_menu.actions()
+            if action.text() == "Job interview"
+        ).trigger()
+        window.flow_action.trigger()
+        assert window._selected_model() == "llama3"
+        assert window._selected_scenario == "Job interview"
+        assert window._corrections_on is False
+
+        window._on_recording_started()
+        assert not window.flow_action.isEnabled()
+        assert not window.model_menu.isEnabled()
+        assert not window.scenario_menu.isEnabled()
+        assert not window.settings_action.isEnabled()
 
         window._on_finished()
         assert window.flow_action.isEnabled()
         assert window.model_menu.isEnabled()
         assert window.scenario_menu.isEnabled()
         assert window.settings_action.isEnabled()
+        assert window.new_session_action.isEnabled()
         window.close()
+
+
+def test_new_session_resets_context_while_worker_is_waiting(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        context = ConversationContext()
+        context.add_message("user", "old conversation")
+        window = _make_window(db, session="old-session")
+        window.context = context
+        window.worker = SimpleNamespace(
+            isRunning=lambda: True,
+            built_pipeline=None,
+        )
+        window._capture_state = "ready"
+
+        with patch.object(SessionSummaryDialog, "exec_", return_value=SessionSummaryDialog.NEW_SESSION):
+            window._end_session()
+
+        assert window.session_id != "old-session"
+        assert context.messages == []
+        assert window.history.toPlainText() == ""
+        window.close()
+
+
+def test_model_selection_updates_loaded_pipeline_for_next_turn(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        pipeline = SimpleNamespace(llm=SimpleNamespace(model="mistral"))
+        window._pipeline = pipeline
+        window._on_models_ready(["mistral", "llama3"])
+
+        window._select_model("llama3")
+
+        assert pipeline.llm.model == "llama3"
+        assert db.get_setting("last_model") == "llama3"
+        window.close()
+
+
+def test_settings_restart_worker_to_apply_capture_changes(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        worker = SimpleNamespace(
+            isRunning=lambda: True,
+            requestInterruption=MagicMock(),
+            end_ptt=MagicMock(),
+            begin_ptt=MagicMock(),
+            built_pipeline=object(),
+        )
+        window.worker = worker
+        dialog = SimpleNamespace(exec_=lambda: 1)
+        with patch("ui.main_window.SettingsDialog", return_value=dialog):
+            window._open_settings()
+
+        assert window._restart_after_settings is True
+        assert window._pipeline is None
+        worker.requestInterruption.assert_called_once()
+        window.close()
+
+
+def test_finished_worker_restarts_after_settings_change(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        window.worker = SimpleNamespace(built_pipeline=object())
+        window._restart_after_settings = True
+
+        with patch.object(MainWindow, "start") as restart:
+            window._on_finished()
+            app.processEvents()
+
+        restart.assert_called_once()
+        assert window._pipeline is None
+        window.close()
+
+
+def test_closing_after_settings_does_not_restart_worker(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        window.worker = SimpleNamespace(isRunning=lambda: False, built_pipeline=object())
+        window._restart_after_settings = True
+        window._closing = True
+
+        with patch.object(MainWindow, "start") as restart:
+            window._on_finished()
+            app.processEvents()
+
+        restart.assert_not_called()
+        assert not window._restart_after_settings
 
 
 def test_only_female_voice_is_available(tmp_path):
@@ -393,6 +511,27 @@ def test_response_audio_controls_follow_replay_state(tmp_path):
 
         assert window.replay_response_button.isEnabled()
         assert db.session_stats("session")["turns"] == 1
+        window.close()
+
+
+def test_interrupted_reply_is_kept_in_history_but_not_context(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        result = TurnResult(
+            "Tell me about it", "I think that", CoachFeedback(),
+            TurnMetrics(3, 0, False, None),
+            is_complete=False,
+            error="stream disconnected",
+        )
+
+        window._on_completed(result, 500)
+
+        assert "Tell me about it" in window.history.toPlainText()
+        assert "response interrupted" in window.history.toPlainText().lower()
+        assert "I think that" in window.history.toPlainText()
+        assert db.recent_context_messages("session", 10) == []
+        assert db.session_stats("session")["turns"] == 0
         window.close()
 
 
@@ -616,7 +755,7 @@ def test_today_shows_passive_activity_metrics_without_action_buttons(tmp_path):
 
         summary = window.today.text().lower()
         assert not window.today.findChildren(QPushButton)
-        assert "active minutes" in summary
+        assert "recorded minutes" in summary
         assert "words spoken" in summary
         assert "completed turns" in summary
         assert "fillers / 100 words" in summary
@@ -626,6 +765,25 @@ def test_today_shows_passive_activity_metrics_without_action_buttons(tmp_path):
         assert "completed turns: 1" in summary
         assert "fillers / 100 words: 4.0" in summary
         assert "corrections: 1" in summary
+        window.close()
+
+
+def test_today_counts_only_microphone_recording_time(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        db.add_completed_turn(
+            "session", "I went home", "What did you do there?", "mistral", 100,
+            CoachFeedback(), TurnMetrics(4, 0, False, None),
+        )
+        first = (datetime.utcnow() - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
+        db.connection.execute("UPDATE conversations SET created_at=?", (first,))
+        db.add_recording_duration("session", 90.0)
+        window = _make_window(db)
+
+        summary = window.today.text().lower()
+        assert "recorded minutes: 1.5" in summary
+        assert "recording goal: 1.5 / 15 min" in summary
+        assert "120" not in summary
         window.close()
 
 
@@ -707,6 +865,24 @@ def test_fixes_is_read_only_without_correction_input(tmp_path):
 
         assert window.fixes.isReadOnly()
         assert not hasattr(window, "correction_input")
+        assert "no clear corrections" in window.fixes.toPlainText().lower()
+        window.close()
+
+
+def test_fix_from_legacy_conversation_is_rendered_in_fixes(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        db.add_turn(
+            "session", "I goed home",
+            "What happened? [Correction: I goed → I went] "
+            "[Better phrasing: I headed home.]\n[Category: verb_tense]",
+            "mistral", 100,
+        )
+        window = _make_window(db)
+
+        fixes = window.fixes.toPlainText()
+        assert "I goed → I went" in fixes
+        assert "I headed home." in fixes
         window.close()
 
 
@@ -733,6 +909,7 @@ def test_progress_dialog_requires_three_days_for_trend():
     dialog = ProgressDialog(SparseProgress())
 
     assert dialog.status_label.text() == "More practice days are needed for a trend"
+    assert dialog.practice_time_label.text() == "Recorded audio time:"
     dialog.close()
 
 

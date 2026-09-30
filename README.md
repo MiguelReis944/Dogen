@@ -53,10 +53,15 @@ Abra **File → Progress…** para consultar os últimos 7 ou 30 dias. As métri
 - um dia de prática é um dia com pelo menos um turno concluído;
 - `fillers / 100 words` = fillers detectados ÷ palavras persistidas × 100;
 - `Transcripts you edited` = transcrições alteradas na revisão ÷ turnos com métricas;
-- tempo de prática é o intervalo entre o primeiro e o último turno de cada sessão;
+- tempo de prática soma apenas os frames de áudio capturados enquanto o microfone está
+  gravando; pausas de processamento e intervalos entre turnos não entram na conta;
 - categorias contam apenas correções estruturadas produzidas pelo coach.
 
-Sessões antigas continuam contando como atividade, mas aparecem como **Not enough data** em taxas que ainda não eram armazenadas. O Dogen não mostra nota de pronúncia, fluência ou proficiência porque essas medidas exigem um avaliador fonético validado; atividade e opinião do LLM não são substitutos honestos.
+Sessões antigas continuam contando como atividade, mas não têm duração retroativa de
+gravação e não entram nos minutos registrados. Elas aparecem como **Not enough data**
+em taxas que ainda não eram armazenadas. O Dogen não mostra nota de pronúncia, fluência
+ou proficiência porque essas medidas exigem um avaliador fonético validado; atividade e
+opinião do LLM não são substitutos honestos.
 
 ## Configuração (`settings.json`)
 

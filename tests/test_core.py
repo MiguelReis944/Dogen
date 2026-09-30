@@ -1,5 +1,6 @@
 import sqlite3
 import sys
+from datetime import date
 from types import SimpleNamespace
 
 import numpy as np
@@ -9,8 +10,11 @@ from audio.recorder import Recorder, RecordingResult
 from nlp.llm import ConversationContext, OllamaClient
 from nlp.feedback import CoachFeedback
 from nlp.transcriber import _looks_like_silence
+from pipeline import ProcessingPipeline, TurnResult
 from storage.db import Database
 from storage.models import TurnMetrics
+from storage.progress import ProgressService
+from ui.dogen_logo import WINDOWS_APP_USER_MODEL_ID, set_windows_app_user_model_id
 from utils.config import AppConfig, load_config, save_config
 from audio.vad import VoiceDetector
 
@@ -41,7 +45,7 @@ def test_recorder_reports_ptt_release(monkeypatch):
     assert result.stop_reason == "ptt_release"
     assert result.samples.dtype == np.float32
     assert result.samples.ndim == 1
-    assert result.duration_sec >= 0
+    assert result.duration_sec == pytest.approx(0.2)
 
 
 def test_recorder_applies_noise_reduction_when_enabled(monkeypatch):
@@ -97,7 +101,7 @@ def test_recorder_reports_timeout(monkeypatch):
     assert isinstance(result, RecordingResult)
     assert result.stop_reason == "timeout"
     assert result.samples.size == 0
-    assert result.duration_sec == 61.0
+    assert result.duration_sec == 0.0
 
 
 def test_recorder_reports_cancellation(monkeypatch):
@@ -178,6 +182,43 @@ def test_corrupt_database_is_backed_up_and_recreated(tmp_path):
     assert backups[0].read_bytes() == b"not a SQLite database"
 
 
+def test_existing_database_schema_migrates_without_losing_messages(tmp_path):
+    path = tmp_path / "conversations.db"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "CREATE TABLE conversations (id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, "
+            "created_at DATETIME DEFAULT CURRENT_TIMESTAMP, role TEXT NOT NULL, "
+            "content TEXT NOT NULL, model_used TEXT, latency_ms INTEGER)"
+        )
+        connection.execute(
+            "INSERT INTO conversations(session_id,role,content) VALUES('s1','user','hello')"
+        )
+
+    with Database(path) as db:
+        assert db.recent_context_messages("s1", 10)[0].content == "hello"
+        assert db.recording_seconds_for_session("s1") == 0
+
+
+def test_windows_taskbar_identity_is_set_before_the_window_is_created(monkeypatch):
+    calls = []
+
+    class AppIdSetter:
+        def __call__(self, app_id):
+            calls.append(app_id)
+            return 0
+
+    class Shell32:
+        SetCurrentProcessExplicitAppUserModelID = AppIdSetter()
+
+    monkeypatch.setattr("ui.dogen_logo.sys.platform", "win32")
+    monkeypatch.setattr(
+        "ui.dogen_logo.ctypes.WinDLL", lambda *_args, **_kwargs: Shell32(), raising=False
+    )
+
+    assert set_windows_app_user_model_id() is True
+    assert calls == [WINDOWS_APP_USER_MODEL_ID]
+
+
 def test_config_round_trip(tmp_path):
     path = tmp_path / "settings.json"
     save_config(AppConfig(ollama_model="custom"), path)
@@ -256,6 +297,144 @@ def test_session_full_stats_counts_turns_and_corrections(tmp_path):
         assert stats["vocab"][0].original == "I goed"
         assert stats["vocab"][0].corrected == "I went"
         assert stats["minutes"] >= 0
+
+
+def test_session_duration_counts_captured_audio_not_time_between_turns(tmp_path):
+    from datetime import datetime, timedelta
+
+    with Database(tmp_path / "conversations.db") as db:
+        db.add_turn("s1", "First turn", "First reply", "mistral", 100)
+        db.add_turn("s1", "Second turn", "Second reply", "mistral", 100)
+        first = (datetime.utcnow() - timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S")
+        last = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        db.connection.execute(
+            "UPDATE conversations SET created_at=? WHERE session_id=? AND role='user' AND id=("
+            "SELECT MIN(id) FROM conversations WHERE session_id=? AND role='user')",
+            (first, "s1", "s1"),
+        )
+        db.connection.execute(
+            "UPDATE conversations SET created_at=? WHERE session_id=? AND role='user' AND id=("
+            "SELECT MAX(id) FROM conversations WHERE session_id=? AND role='user')",
+            (last, "s1", "s1"),
+        )
+        db.add_recording_duration("s1", 75.0)
+
+        assert db.session_full_stats("s1")["minutes"] == pytest.approx(1.25)
+
+
+def test_progress_time_uses_recorded_audio_not_turn_gaps(tmp_path):
+    from datetime import datetime, timedelta
+
+    with Database(tmp_path / "conversations.db") as db:
+        db.add_turn("s1", "First turn", "First reply", "mistral", 100)
+        db.add_turn("s1", "Second turn", "Second reply", "mistral", 100)
+        first = (datetime.utcnow() - timedelta(hours=2)).strftime("%Y-%m-%d %H:%M:%S")
+        db.connection.execute(
+            "UPDATE conversations SET created_at=? WHERE session_id=?", (first, "s1")
+        )
+        db.add_recording_duration("s1", 90.0)
+
+        stats = ProgressService(db).stats(7, date.today())
+
+        assert stats.minutes_practiced == pytest.approx(1.5)
+
+
+def test_legacy_turn_annotations_are_available_as_fixes(tmp_path):
+    with Database(tmp_path / "conversations.db") as db:
+        db.add_turn(
+            "s1", "I goed home", "What happened? [Correction: I goed → I went] "
+            "[Better phrasing: I headed home.]\n[Category: verb_tense]", "mistral", 100
+        )
+
+        assert db.feedback_for_session("s1") == [CoachFeedback(
+            correction="I goed → I went",
+            better_phrasing="I headed home.",
+            category="verb_tense",
+        )]
+
+
+def test_pre_feedback_database_annotations_are_recovered_for_fixes(tmp_path):
+    with Database(tmp_path / "conversations.db") as db:
+        db.add_message(
+            "s1", "assistant",
+            "Try this. [Correction: I goed → I went] [Category: verb_tense]",
+            "mistral", 100,
+        )
+
+        assert db.feedback_for_session("s1") == [CoachFeedback(
+            correction="I goed → I went", category="verb_tense"
+        )]
+
+
+def test_interrupted_turn_is_saved_but_not_added_to_future_context(tmp_path):
+    with Database(tmp_path / "conversations.db") as db:
+        db.add_interrupted_turn("s1", "Tell me about it", "I think that", "mistral", 500)
+
+        messages = db.recent_messages("s1", 10)
+        context_messages = db.recent_context_messages("s1", 10)
+
+        assert [message.content for message in messages] == [
+            "Tell me about it", "I think that"
+        ]
+        assert messages[-1].is_complete is False
+        assert context_messages == []
+        assert db.session_stats("s1")["turns"] == 0
+
+
+def test_pipeline_keeps_partial_reply_when_llm_stream_fails():
+    class Transcriber:
+        def transcribe(self, audio):
+            return "Tell me more"
+
+    class BrokenLLM:
+        def generate(self, messages, on_chunk, cancelled):
+            on_chunk("I think that")
+            raise RuntimeError("stream disconnected")
+
+    class Synthesizer:
+        def synthesize_stream(self, text):
+            yield np.ones(1600, dtype=np.float32), 16000
+
+    class Player:
+        def play(self, *args, **kwargs):
+            return None
+
+    result = ProcessingPipeline(Transcriber(), BrokenLLM(), Synthesizer(), Player()).run(
+        np.ones(1600, dtype=np.float32), ConversationContext(), lambda *_: None,
+        lambda: False,
+    )
+
+    assert isinstance(result, TurnResult)
+    assert result.reply == "I think that"
+    assert result.is_complete is False
+    assert "stream disconnected" in result.error
+
+
+def test_pipeline_persists_answer_even_if_tts_playback_fails():
+    class Transcriber:
+        def transcribe(self, audio):
+            return "Tell me more"
+
+    class LLM:
+        def generate(self, messages, on_chunk, cancelled):
+            on_chunk("Here is the answer.")
+
+    class Synthesizer:
+        def synthesize_stream(self, text):
+            yield np.ones(1600, dtype=np.float32), 16000
+
+    class BrokenPlayer:
+        def play(self, *args, **kwargs):
+            raise RuntimeError("audio device disconnected")
+
+    result = ProcessingPipeline(Transcriber(), LLM(), Synthesizer(), BrokenPlayer()).run(
+        np.ones(1600, dtype=np.float32), ConversationContext(), lambda *_: None,
+        lambda: False,
+    )
+
+    assert result.reply == "Here is the answer."
+    assert result.is_complete is True
+    assert "audio device disconnected" in result.audio_error
 
 
 def test_database_saves_structured_feedback_only_when_present(tmp_path):

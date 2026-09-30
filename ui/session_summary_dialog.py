@@ -29,7 +29,7 @@ class SessionSummaryDialog(QDialog):
         metrics_row.setSpacing(24)
         for value, label in [
             (str(turns),       "turns"),
-            (f"{minutes:.0f}", "min"),
+            (f"{minutes:.1f}", "recorded min"),
             (str(corrections), "corrections"),
             (str(fillers),     "filler words"),
         ]:

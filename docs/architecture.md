@@ -9,8 +9,11 @@ grava SQLite; `pipeline.py` orquestra o turno e o cancelamento; `utils/` lê con
 ## Fluxos de dados e controle
 
 O fluxo principal é `microfone → VAD → Whisper → Ollama/Mistral → Coqui TTS → player`.
-Um turno completo grava mensagens em `conversations.db` e mantém até dez pares de
-contexto, conforme `context_size`.
+Um turno completo grava mensagens, feedback estruturado e métricas em
+`conversations.db`, e mantém até dez pares de contexto, conforme `context_size`.
+Áudio capturado é registrado separadamente para medir tempo de microfone sem incluir
+intervalos ou processamento. Respostas de streaming interrompidas ficam marcadas no
+histórico, mas são excluídas da restauração do contexto e dos turnos concluídos.
 
 ## Interfaces
 

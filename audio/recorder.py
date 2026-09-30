@@ -81,7 +81,9 @@ class Recorder:
         if stop_fn is None:
             self._noise_floor = detector.noise_floor
 
-        duration_sec = max(0.0, monotonic() - start)
+        # Count only captured PCM frames. Wall-clock elapsed time includes stream
+        # setup, processing pauses, and empty waits where no audio was recorded.
+        duration_sec = sum(chunk.size for chunk in chunks) / self.sample_rate
         samples = (
             np.concatenate(chunks).astype(np.float32, copy=False)
             if chunks

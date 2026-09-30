@@ -386,6 +386,8 @@ class MainWindow(QMainWindow):
         self._startup_timer = None
         self._last_error = None
         self._replay_error = None
+        self._response_notice = None
+        self._restart_after_settings = False
         self._corrections_on = True
         self._capture_state = "ready"
         self._record_when_ready = False
@@ -440,8 +442,8 @@ class MainWindow(QMainWindow):
         self.today.setFont(base_font)
         self.today.setWordWrap(True)
         self.today.setToolTip(
-            "Daily conversation time is estimated from your first to last completed turn; "
-            "it is not microphone speaking time."
+            "Counts captured microphone audio only. Older sessions have no recorded duration "
+            "and are not estimated from the time between turns."
         )
         today_layout.addWidget(self.today)
         side_layout.addWidget(self.today_group, stretch=1)
@@ -682,6 +684,9 @@ class MainWindow(QMainWindow):
             self._current_model = self._model_names[0]
         self._restore_model_preference()
         self._rebuild_model_menu()
+        pipeline = self._pipeline or (self.worker.built_pipeline if self.worker else None)
+        if pipeline is not None:
+            pipeline.llm.model = self._current_model
 
     def _rebuild_model_menu(self):
         if not hasattr(self, "model_menu"):
@@ -696,6 +701,11 @@ class MainWindow(QMainWindow):
     def _select_model(self, name: str):
         if name in self._model_names:
             self._current_model = name
+            pipeline = self._pipeline or (
+                self.worker.built_pipeline if self.worker else None
+            )
+            if pipeline is not None:
+                pipeline.llm.model = name
             self._on_model_changed(name)
             self._rebuild_model_menu()
 
@@ -743,17 +753,17 @@ class MainWindow(QMainWindow):
         today = date.today()
         connection = self.db.connection
         day_start, day_end = _utc_bounds_for_local_day(today)
-        turn_sessions = connection.execute(
-            "SELECT session_id, COUNT(*), MIN(created_at), MAX(created_at) FROM conversations "
-            "WHERE role='user' AND created_at>=? AND created_at<? GROUP BY session_id",
+        recorded_seconds = connection.execute(
+            "SELECT COALESCE(SUM(duration_sec),0) FROM recordings "
+            "WHERE created_at>=? AND created_at<?",
             (day_start, day_end),
-        ).fetchall()
-        minutes = sum(
-            max(0.0, (datetime.fromisoformat(last) - datetime.fromisoformat(first)).total_seconds())
-            for _, _, first, last in turn_sessions
-            if first and last
-        ) / 60
-        turns = sum(count for _, count, _, _ in turn_sessions)
+        ).fetchone()[0]
+        minutes = float(recorded_seconds or 0) / 60
+        turns = connection.execute(
+            "SELECT COUNT(*) FROM conversations WHERE role='user' AND is_complete=1 "
+            "AND created_at>=? AND created_at<?",
+            (day_start, day_end),
+        ).fetchone()[0]
         words, fillers = connection.execute(
             "SELECT COALESCE(SUM(word_count),0), COALESCE(SUM(filler_count),0) "
             "FROM turn_metrics WHERE created_at>=? AND created_at<?",
@@ -789,8 +799,8 @@ class MainWindow(QMainWindow):
             else "Not enough data"
         )
         self.today.setText(
-            f"Conversation goal: ~{minutes:.1f} / 15 min\n"
-            f"Active minutes: {minutes:.1f}\n"
+            f"Recording goal: {minutes:.1f} / 15 min\n"
+            f"Recorded minutes: {minutes:.1f}\n"
             f"Words spoken: {words}\n"
             f"Completed turns: {turns}\n"
             f"Fillers / 100 words: {filler_text}\n"
@@ -800,8 +810,10 @@ class MainWindow(QMainWindow):
 
     # ── history rendering ──────────────────────────────────────────────────────
 
-    def _format_message(self, role, content):
-        label = "You" if role == "user" else "Dogen"
+    def _format_message(self, role, content, is_complete=True):
+        label = "You" if role == "user" else (
+            "Dogen (response interrupted)" if not is_complete else "Dogen"
+        )
         escaped = html.escape(content)
         if role == "user":
             escaped = highlight_fillers_html(escaped)
@@ -823,13 +835,21 @@ class MainWindow(QMainWindow):
         # Scoped to the current session only — a new session must start blank.
         messages = self.db.recent_messages(self.session_id, 200)
         for message in messages:
-            self.history.append(self._format_message(message.role, message.content))
+            self.history.append(self._format_message(
+                message.role, message.content, message.is_complete
+            ))
         self._render_fixes()
         self._assistant_open = False
 
     def _render_fixes(self):
         self.fixes.clear()
-        for feedback in self.db.feedback_for_session(self.session_id):
+        feedback_items = self.db.feedback_for_session(self.session_id)
+        if not feedback_items:
+            self.fixes.setPlainText(
+                "No clear corrections have been recorded for this session yet."
+            )
+            return
+        for feedback in feedback_items:
             self.fixes.append(self._format_feedback(feedback))
 
     def _format_feedback(self, feedback: CoachFeedback):
@@ -848,6 +868,7 @@ class MainWindow(QMainWindow):
     # ── start / stop ───────────────────────────────────────────────────────────
 
     def _set_configuration_enabled(self, enabled: bool):
+        self.new_session_action.setEnabled(enabled)
         self.model_menu.setEnabled(enabled)
         self.scenario_menu.setEnabled(enabled)
         self.flow_action.setEnabled(enabled)
@@ -919,8 +940,10 @@ class MainWindow(QMainWindow):
     # ── worker signal handlers ─────────────────────────────────────────────────
 
     def _on_recording_started(self):
+        self._set_configuration_enabled(False)
         self._last_error = None
         self._replay_error = None
+        self._response_notice = None
         self._set_capture_state("recording")
         self.pet.set_state("listening")
         self.replay_response_button.setEnabled(False)
@@ -930,12 +953,18 @@ class MainWindow(QMainWindow):
         self._set_capture_state("recording", "Recording — click Finish recording when you're done")
 
     def _on_recording_finished(self, stop_reason: str, duration_sec: float):
+        try:
+            self.db.add_recording_duration(self.session_id, duration_sec)
+            self._render_today()
+        except Exception:
+            logging.exception("Could not save captured recording duration")
         self._set_capture_state("processing")
         self.record_button.setText("Processing…")
         self.record_button.setEnabled(False)
         self._set_status(f"Captured {duration_sec:.1f}s · {stop_reason}")
 
     def _on_waiting_for_ptt(self):
+        self._set_configuration_enabled(True)
         self._set_capture_state("ready")
         self.pet.set_state("idle")
         pipeline = self._pipeline or getattr(self.worker, "built_pipeline", None)
@@ -943,7 +972,9 @@ class MainWindow(QMainWindow):
         self.stop_audio_button.setEnabled(False)
         self.record_button.setText("Start recording")
         self.record_button.setEnabled(True)
-        self._set_capture_state("ready", "Ready — click Start recording to speak")
+        self._set_capture_state(
+            "ready", self._response_notice or "Ready — click Start recording to speak"
+        )
         if self._record_when_ready and self.worker and self.worker.isRunning():
             self._record_when_ready = False
             self.worker.begin_ptt()
@@ -965,7 +996,7 @@ class MainWindow(QMainWindow):
         self.pet.set_state("idle")
         self.stop_audio_button.setEnabled(False)
         if self._last_error is None:
-            self._set_status(self._idle_instruction())
+            self._set_status(self._response_notice or self._idle_instruction())
 
     def _on_transcript_review(self, text: str):
         """Show the editable review bar with a 5-second auto-confirm countdown."""
@@ -1018,18 +1049,36 @@ class MainWindow(QMainWindow):
 
     def _on_completed(self, result, latency_ms):
         try:
-            self.db.add_completed_turn(
-                self.session_id,
-                result.transcript,
-                result.reply,
-                self._selected_model(),
-                latency_ms,
-                result.feedback,
-                result.metrics,
-            )
+            if result.is_complete:
+                self.db.add_completed_turn(
+                    self.session_id,
+                    result.transcript,
+                    result.reply,
+                    self._selected_model(),
+                    latency_ms,
+                    result.feedback,
+                    result.metrics,
+                )
+                self._last_assistant_text = result.reply
+                self._response_notice = (
+                    f"Response saved, but audio playback failed: {result.audio_error}"
+                    if result.audio_error else None
+                )
+            else:
+                self.db.add_interrupted_turn(
+                    self.session_id,
+                    result.transcript,
+                    result.reply,
+                    self._selected_model(),
+                    latency_ms,
+                )
+                self._last_assistant_text = ""
+                self._response_notice = (
+                    "Response interrupted and saved: "
+                    + (result.error or "the model stream ended unexpectedly")
+                )
             self._render_history()
             self._update_stats()
-            self._last_assistant_text = result.reply
             self._last_error = None
         except Exception as exc:
             logging.exception("Could not save conversation turn")
@@ -1040,7 +1089,7 @@ class MainWindow(QMainWindow):
             self._set_status(f"Could not save turn: {exc}")
 
     def _on_finished(self):
-        if self.worker and self.worker.built_pipeline:
+        if self.worker and self.worker.built_pipeline and not self._restart_after_settings:
             self._pipeline = self.worker.built_pipeline
         if self._assistant_open:
             self._render_history()
@@ -1056,9 +1105,17 @@ class MainWindow(QMainWindow):
         self.stop_audio_button.setEnabled(False)
         self.replay_response_button.setEnabled(bool(self._last_assistant_text and self._pipeline))
         if self._last_error is None:
-            self._set_status(self._idle_instruction())
+            self._set_status(self._response_notice or self._idle_instruction())
         if self._closing:
+            self._restart_after_settings = False
             self.close()
+            return
+        if self._restart_after_settings:
+            self._restart_after_settings = False
+            self._pipeline = None
+            self.context.max_history = self.config.context_size
+            QTimer.singleShot(0, self.start)
+            return
 
     # ── text append ────────────────────────────────────────────────────────────
 
@@ -1116,8 +1173,13 @@ class MainWindow(QMainWindow):
         path = self.settings_path or Path("settings.json")
         dlg = SettingsDialog(self.config, path, parent=self)
         if dlg.exec_():
-            # Invalidate pipeline so next start picks up new whisper model etc.
+            self.context.max_history = self.config.context_size
             self._pipeline = None
+            if self.worker and self.worker.isRunning():
+                # Recorder and models are owned by the worker; restart it between turns
+                # so accepted settings take effect without racing an active capture.
+                self._restart_after_settings = True
+                self.stop()
 
     def _show_progress(self):
         ProgressDialog(ProgressService(self.db), parent=self).exec_()
@@ -1125,8 +1187,7 @@ class MainWindow(QMainWindow):
     # ── session management ─────────────────────────────────────────────────────
 
     def _end_session(self):
-        if self.worker and self.worker.isRunning():
-            self.stop()
+        if self.worker and self.worker.isRunning() and self._capture_state != "ready":
             return
         stats = self.db.session_full_stats(self.session_id)
         dlg = SessionSummaryDialog(stats, parent=self)
@@ -1135,6 +1196,9 @@ class MainWindow(QMainWindow):
             self.session_id = uuid.uuid4().hex
             self.context.reset()
             self._pipeline = None
+            self._last_assistant_text = ""
+            self._response_notice = None
+            self.replay_response_button.setEnabled(False)
             self._render_history()
             self._update_stats()
             self.status.setText("New session started")
@@ -1166,7 +1230,9 @@ class MainWindow(QMainWindow):
                     if date != last_date:
                         f.write(f"\n── {date} ──\n")
                         last_date = date
-                    label = "You" if m.role == "user" else "Dogen"
+                    label = "You" if m.role == "user" else (
+                        "Dogen (response interrupted)" if not m.is_complete else "Dogen"
+                    )
                     f.write(f"{label}: {m.content}\n")
             self.status.setText(f"Exported to {path}")
         except OSError as exc:

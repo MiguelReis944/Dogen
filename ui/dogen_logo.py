@@ -13,6 +13,21 @@ from PyQt5.QtWidgets import QHBoxLayout, QLabel, QWidget
 HUD_BACKGROUND = 0x00261B11
 HUD_BORDER = 0x00473726
 HUD_TEXT = 0x00F5F1E8
+WINDOWS_APP_USER_MODEL_ID = "MiguelReis944.Dogen"
+
+
+def set_windows_app_user_model_id():
+    """Give the Python-hosted window a Dogen taskbar identity on Windows."""
+    if sys.platform != "win32":
+        return False
+    try:
+        shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+        setter = shell32.SetCurrentProcessExplicitAppUserModelID
+        setter.argtypes = [ctypes.c_wchar_p]
+        setter.restype = ctypes.c_long
+        return setter(WINDOWS_APP_USER_MODEL_ID) == 0
+    except (AttributeError, OSError, TypeError, ValueError):
+        return False
 
 
 def _paint_dogen_face(painter, rect):

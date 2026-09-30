@@ -8,6 +8,7 @@ class Message:
     created_at: str
     model_used: str | None = None
     latency_ms: int | None = None
+    is_complete: bool = True
 
 
 @dataclass(frozen=True)

@@ -1,14 +1,12 @@
 """SQLite persistence for Dogen sessions."""
 
-import re
 import sqlite3
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
-from nlp.feedback import CoachFeedback, correction_pair
+from nlp.feedback import CoachFeedback, correction_pair, parse_reply
 from storage.models import Message, TurnMetrics, VocabItem
-
-_CORRECTION_RE = re.compile(r'\[Correction:\s*(.+?)\s*→\s*(.+?)\]')
 
 
 class Database:
@@ -48,7 +46,8 @@ class Database:
             role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
             content TEXT NOT NULL,
             model_used TEXT,
-            latency_ms INTEGER
+            latency_ms INTEGER,
+            is_complete INTEGER NOT NULL DEFAULT 1
         );
         CREATE INDEX IF NOT EXISTS conversations_session ON conversations(session_id, id);
         CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -79,7 +78,22 @@ class Database:
             correction_category TEXT
         );
         CREATE INDEX IF NOT EXISTS turn_metrics_session ON turn_metrics(session_id, id);
+        CREATE TABLE IF NOT EXISTS recordings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            duration_sec REAL NOT NULL CHECK(duration_sec >= 0)
+        );
+        CREATE INDEX IF NOT EXISTS recordings_session ON recordings(session_id, id);
         """)
+
+        conversation_columns = {
+            row[1] for row in self.connection.execute("PRAGMA table_info(conversations)")
+        }
+        if "is_complete" not in conversation_columns:
+            self.connection.execute(
+                "ALTER TABLE conversations ADD COLUMN is_complete INTEGER NOT NULL DEFAULT 1"
+            )
 
     # ── conversations ──────────────────────────────────────────────────────────
 
@@ -100,8 +114,20 @@ class Database:
                     (session_id, "assistant", assistant_text, model_used, latency_ms),
                 ],
             )
-        # Extract and persist any corrections from the assistant reply
-        self._save_corrections(session_id, assistant_text)
+            self._insert_feedback(session_id, parse_reply(assistant_text).feedback)
+
+    def add_interrupted_turn(self, session_id: str, user_text: str, assistant_text: str,
+                             model_used: str, latency_ms: int) -> None:
+        """Keep a failed streamed answer visible without treating it as context or a completed turn."""
+        with self.connection:
+            self.connection.executemany(
+                "INSERT INTO conversations(session_id,role,content,model_used,latency_ms,is_complete) "
+                "VALUES(?,?,?,?,?,0)",
+                [
+                    (session_id, "user", user_text, model_used, latency_ms),
+                    (session_id, "assistant", assistant_text, model_used, latency_ms),
+                ],
+            )
 
     def add_completed_turn(self, session_id: str, user_text: str, assistant_text: str,
                            model_used: str, latency_ms: int, feedback: CoachFeedback,
@@ -130,36 +156,47 @@ class Database:
 
     def recent_messages(self, session_id: str, count: int) -> list[Message]:
         rows = self.connection.execute(
-            "SELECT role,content,created_at,model_used,latency_ms FROM "
-            "(SELECT id,role,content,created_at,model_used,latency_ms FROM conversations "
+            "SELECT role,content,created_at,model_used,latency_ms,is_complete FROM "
+            "(SELECT id,role,content,created_at,model_used,latency_ms,is_complete FROM conversations "
             "WHERE session_id=? ORDER BY id DESC LIMIT ?) ORDER BY id",
             (session_id, count),
         ).fetchall()
-        return [Message(*row) for row in rows]
+        return [_message_from_row(row) for row in rows]
+
+    def recent_context_messages(self, session_id: str, count: int) -> list[Message]:
+        """Return only complete turns for restoring LLM context after restart."""
+        rows = self.connection.execute(
+            "SELECT role,content,created_at,model_used,latency_ms,is_complete FROM "
+            "(SELECT id,role,content,created_at,model_used,latency_ms,is_complete FROM conversations "
+            "WHERE session_id=? AND is_complete=1 ORDER BY id DESC LIMIT ?) ORDER BY id",
+            (session_id, count),
+        ).fetchall()
+        return [_message_from_row(row) for row in rows]
 
     def session_messages(self, session_id: str):
         """Iterate every message in one session in conversation order."""
         rows = self.connection.execute(
-            "SELECT role,content,created_at,model_used,latency_ms "
+            "SELECT role,content,created_at,model_used,latency_ms,is_complete "
             "FROM conversations WHERE session_id=? ORDER BY id",
             (session_id,),
         )
         for row in rows:
-            yield Message(*row)
+            yield _message_from_row(row)
 
     def recent_all_messages(self, count: int) -> list[Message]:
         """Load the most recent messages across all sessions (for cross-day history display)."""
         rows = self.connection.execute(
-            "SELECT role,content,created_at,model_used,latency_ms FROM "
-            "(SELECT id,role,content,created_at,model_used,latency_ms FROM conversations "
+            "SELECT role,content,created_at,model_used,latency_ms,is_complete FROM "
+            "(SELECT id,role,content,created_at,model_used,latency_ms,is_complete FROM conversations "
             "ORDER BY id DESC LIMIT ?) ORDER BY id",
             (count,),
         ).fetchall()
-        return [Message(*row) for row in rows]
+        return [_message_from_row(row) for row in rows]
 
     def session_stats(self, session_id: str) -> dict:
         row = self.connection.execute(
-            "SELECT COUNT(*), AVG(latency_ms) FROM conversations WHERE session_id=? AND role='user'",
+            "SELECT COUNT(*), AVG(latency_ms) FROM conversations "
+            "WHERE session_id=? AND role='user' AND is_complete=1",
             (session_id,),
         ).fetchone()
         return {"turns": row[0] or 0, "avg_latency_ms": int(row[1]) if row[1] else 0}
@@ -169,6 +206,24 @@ class Database:
             "SELECT session_id FROM conversations ORDER BY id DESC LIMIT 1"
         ).fetchone()
         return row[0] if row else None
+
+    def add_recording_duration(self, session_id: str, duration_sec: float) -> None:
+        """Persist the actual captured audio duration, independent of response latency."""
+        duration = float(duration_sec)
+        if not (duration >= 0 and duration < float("inf")):
+            raise ValueError("Recording duration must be a finite non-negative number")
+        with self.connection:
+            self.connection.execute(
+                "INSERT INTO recordings(session_id,duration_sec) VALUES(?,?)",
+                (session_id, duration),
+            )
+
+    def recording_seconds_for_session(self, session_id: str) -> float:
+        row = self.connection.execute(
+            "SELECT COALESCE(SUM(duration_sec),0) FROM recordings WHERE session_id=?",
+            (session_id,),
+        ).fetchone()
+        return float(row[0] or 0)
 
     # ── settings ───────────────────────────────────────────────────────────────
 
@@ -184,16 +239,6 @@ class Database:
         return row[0] if row else None
 
     # ── vocab ──────────────────────────────────────────────────────────────────
-
-    def _save_corrections(self, session_id: str, assistant_text: str):
-        pairs = _CORRECTION_RE.findall(assistant_text)
-        if not pairs:
-            return
-        with self.connection:
-            self.connection.executemany(
-                "INSERT INTO vocab(session_id,original,corrected) VALUES(?,?,?)",
-                [(session_id, orig.strip(), corr.strip()) for orig, corr in pairs],
-            )
 
     def save_feedback(self, session_id: str, feedback: CoachFeedback) -> None:
         if feedback.is_empty:
@@ -227,12 +272,28 @@ class Database:
             "WHERE session_id=? ORDER BY id",
             (session_id,),
         ).fetchall()
-        return [CoachFeedback(*row) for row in rows]
+        feedback = [CoachFeedback(*row) for row in rows]
+        persisted = Counter(_feedback_key(item) for item in feedback)
+        legacy = self.connection.execute(
+            "SELECT content FROM conversations WHERE session_id=? AND role='assistant' "
+            "ORDER BY id",
+            (session_id,),
+        ).fetchall()
+        for (content,) in legacy:
+            parsed = parse_reply(content).feedback
+            if parsed.is_empty:
+                continue
+            key = _feedback_key(parsed)
+            if persisted[key]:
+                persisted[key] -= 1
+            else:
+                feedback.append(parsed)
+        return feedback
 
     def session_full_stats(self, session_id: str) -> dict:
         row = self.connection.execute(
-            "SELECT COUNT(*), MIN(created_at), MAX(created_at) FROM conversations "
-            "WHERE session_id=? AND role='user'",
+            "SELECT COUNT(*) FROM conversations "
+            "WHERE session_id=? AND role='user' AND is_complete=1",
             (session_id,),
         ).fetchone()
         corrections = self.connection.execute(
@@ -245,16 +306,7 @@ class Database:
         vocab = self.get_vocab_for_session(session_id, limit=20)
 
         turns   = row[0] or 0
-        minutes = 0.0
-        if turns > 1 and row[1] and row[2]:
-            from datetime import datetime
-            fmt = "%Y-%m-%d %H:%M:%S"
-            try:
-                t1 = datetime.strptime(row[1][:19], fmt)
-                t2 = datetime.strptime(row[2][:19], fmt)
-                minutes = (t2 - t1).total_seconds() / 60
-            except Exception:
-                pass
+        minutes = self.recording_seconds_for_session(session_id) / 60
 
         return {
             "turns": turns,
@@ -281,3 +333,11 @@ class Database:
     def clear_vocab(self):
         with self.connection:
             self.connection.execute("DELETE FROM vocab")
+
+
+def _message_from_row(row) -> Message:
+    return Message(*row[:5], bool(row[5]))
+
+
+def _feedback_key(feedback: CoachFeedback) -> tuple:
+    return feedback.correction, feedback.better_phrasing, feedback.category
