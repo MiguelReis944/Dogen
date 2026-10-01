@@ -75,7 +75,14 @@ opinião do LLM não são substitutos honestos.
 | `input_mode` | `ptt` | valor legado; a interface usa gravação manual por cliques |
 | `review_transcript` | `false` | permite editar a transcrição antes de enviá-la |
 | `noise_reduction` | `true` | aplica redução de ruído depois da captura; pode ser desligada para comparar clareza |
+| `diagnostics_enabled` | `false` | grava eventos locais de confiabilidade, sem áudio nem transcrições |
 | `context_size` | `10` | pares de mensagens mantidos em contexto |
+
+O registro opcional de confiabilidade pode ser ligado em **Settings → Privacy**. Ele fica
+na pasta de dados locais do usuário como `diagnostics.log`, é limitado a 512 KB mais duas
+cópias rotacionadas e registra apenas estados, durações, motivo de parada, tipo de erro e
+um identificador aleatório por turno — nunca áudio, texto da conversa, respostas do modelo
+ou chaves. Desligar a opção interrompe novas gravações no log imediatamente.
 
 Para dispositivos de áudio específicos, rode `python -m sounddevice` para listar os índices e edite `mic_device` / `speaker_device`.
 

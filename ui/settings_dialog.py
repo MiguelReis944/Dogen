@@ -66,6 +66,21 @@ class SettingsDialog(QDialog):
         form3.addRow("Context turns kept:", self._context_size)
         outer.addWidget(ctx_box)
 
+        # ── privacy ────────────────────────────────────────────────────────────
+        privacy_box = QGroupBox("Privacy")
+        privacy_layout = QVBoxLayout(privacy_box)
+        self._diagnostics = QCheckBox(
+            "Save local reliability diagnostics (no audio or transcripts)"
+        )
+        self._diagnostics.setObjectName("localDiagnosticsCheck")
+        self._diagnostics.setChecked(config.diagnostics_enabled)
+        self._diagnostics.setToolTip(
+            "Stores allowlisted reliability metadata on this computer only. "
+            "Turning this off stops new diagnostic log entries immediately."
+        )
+        privacy_layout.addWidget(self._diagnostics)
+        outer.addWidget(privacy_box)
+
         # ── daily practice goal ────────────────────────────────────────────────
         goal_box = QGroupBox("Today")
         goal_form = QFormLayout(goal_box)
@@ -87,6 +102,7 @@ class SettingsDialog(QDialog):
         self.config.whisper_model       = self._whisper.currentText()
         self.config.review_transcript   = self._review.isChecked()
         self.config.noise_reduction     = self._noise_reduction.isChecked()
+        self.config.diagnostics_enabled = self._diagnostics.isChecked()
         self.config.vad_threshold       = self._threshold.value()
         self.config.input_mode          = "ptt"
         self.config.context_size        = self._context_size.value()

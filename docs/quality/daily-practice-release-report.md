@@ -54,6 +54,29 @@
 - Verification: `python -m pytest -q` — 131 passed; `git diff --check` — no whitespace
   errors.
 
+## Video reliability and architecture follow-up — 2026-09-30
+
+- The active same-day session ID is restored after restart; starting a new session
+  persists its new ID. An empty session now reports that there is nothing to export
+  instead of creating a blank file.
+- Interrupted model/TTS turns keep the transcript and any generated response visible,
+  stored, and exportable, while remaining outside future model context and completed-turn
+  metrics. Cancellation while waiting for the first model sentence remains responsive.
+- The Today panel now reads the same date-window aggregate as Practice Progress. A local,
+  content-free turn ID links stage durations to the persisted completion/interruption.
+- `ConversationWorker` now lives in `ui/conversation_worker.py`; capture state changes are
+  validated through an explicit lifecycle enum. The barge-in microphone stream is closed
+  before the next capture and during worker shutdown.
+- Reliability diagnostics are off by default, stay in the user's local app-data folder,
+  rotate at 512 KB with two backups, and can be disabled immediately. Tests verify that
+  recognizable private text and arbitrary error identifiers are not written.
+- Verification: `python -m pytest -q -p no:cacheprovider` — 176 passed in 18.48s;
+  `python -m compileall -q main.py pipeline.py ui storage audio utils` and
+  `git diff --check` also passed.
+- Manual microphone/Ollama/TTS use, a fresh Windows taskbar-icon check, vocabulary table
+  appearance, and the seven-day dogfood check remain pending. Automated tests cannot
+  confirm those desktop and real-device results.
+
 ## Environment
 
 - Operating system: Windows

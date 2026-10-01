@@ -24,6 +24,13 @@ as APIs locais do Whisper, Ollama e Coqui. `daily_recording_goal_minutes` config
 meta do Today, com padrão de 15 minutos para arquivos de configuração existentes. Não há
 serviço remoto necessário para o fluxo de produto.
 
+Diagnósticos de confiabilidade são locais e opcionais (`diagnostics_enabled`, desligado
+por padrão). Quando ativados, escrevem eventos com campos permitidos na pasta de dados
+locais do usuário, em um log rotativo limitado a 512 KB e duas cópias. Desativar a opção
+remove o handler imediatamente; conteúdo de áudio, transcrições, respostas e segredos não
+fazem parte do esquema de eventos. Um identificador aleatório de 128 bits correlaciona
+somente as durações das etapas e o resultado de persistência de um turno.
+
 ## Decisões técnicas vigentes
 
 Gravação usa cliques para começar e terminar; revisão de transcrição tem timeout de

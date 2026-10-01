@@ -18,6 +18,7 @@ class ProgressStats:
     transcript_edit_rate: float | None
     corrections_by_category: dict[str, int]
     vocabulary_count: int
+    correction_count: int = 0
 
 
 class ProgressService:
@@ -25,8 +26,8 @@ class ProgressService:
         self.database = database
 
     def stats(self, period_days: int, today: date) -> ProgressStats:
-        if period_days not in {7, 30}:
-            raise ValueError("period_days must be 7 or 30")
+        if period_days not in {1, 7, 30}:
+            raise ValueError("period_days must be 1, 7, or 30")
         cutoff_day = today - timedelta(days=period_days - 1)
         cutoff = cutoff_day.isoformat()
         start, end = _utc_bounds(cutoff_day, today + timedelta(days=1))
@@ -76,6 +77,7 @@ class ProgressService:
             transcript_edit_rate=edit_rate,
             corrections_by_category={category: count for category, count in category_rows},
             vocabulary_count=int(vocabulary_count or 0),
+            correction_count=self.database.correction_count_between(start, end),
         )
 
     def _current_streak(self, today: date) -> int:

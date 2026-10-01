@@ -2,6 +2,7 @@ import sqlite3
 import sys
 from datetime import date
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 import pytest
@@ -46,6 +47,29 @@ def test_recorder_reports_ptt_release(monkeypatch):
     assert result.samples.dtype == np.float32
     assert result.samples.ndim == 1
     assert result.duration_sec == pytest.approx(0.2)
+
+
+def test_ptt_recording_keeps_capturing_through_natural_pause(monkeypatch):
+    quiet_pause = [np.zeros(1600, dtype=np.float32) for _ in range(16)]
+    _fake_sounddevice(
+        monkeypatch,
+        [np.full(1600, 0.1, dtype=np.float32), np.full(1600, 0.1, dtype=np.float32)]
+        + quiet_pause,
+    )
+    monkeypatch.setattr("audio.recorder._denoise", lambda samples, rate: samples)
+    blocks_before_click = [0]
+
+    def user_releases_button():
+        blocks_before_click[0] += 1
+        return blocks_before_click[0] == 18
+
+    result = Recorder(silence_duration_sec=0.1).record(
+        lambda: False, stop_fn=user_releases_button
+    )
+
+    assert result.stop_reason == "ptt_release"
+    assert result.duration_sec == pytest.approx(1.8)
+    assert result.samples.size == 1600 * 18
 
 
 def test_recorder_applies_noise_reduction_when_enabled(monkeypatch):
@@ -439,14 +463,21 @@ def test_pipeline_persists_answer_even_if_tts_playback_fails():
         def play(self, *args, **kwargs):
             raise RuntimeError("audio device disconnected")
 
-    result = ProcessingPipeline(Transcriber(), LLM(), Synthesizer(), BrokenPlayer()).run(
-        np.ones(1600, dtype=np.float32), ConversationContext(), lambda *_: None,
-        lambda: False,
-    )
+    with patch("pipeline.log_diagnostic") as diagnostic:
+        result = ProcessingPipeline(
+            Transcriber(), LLM(), Synthesizer(), BrokenPlayer()
+        ).run(
+            np.ones(1600, dtype=np.float32), ConversationContext(), lambda *_: None,
+            lambda: False,
+        )
 
     assert result.reply == "Here is the answer."
     assert result.is_complete is True
     assert "audio device disconnected" in result.audio_error
+    assert any(
+        call.args[0] == "turn_failed" and call.kwargs.get("stage") == "tts"
+        for call in diagnostic.call_args_list
+    )
 
 
 def test_database_saves_structured_feedback_only_when_present(tmp_path):

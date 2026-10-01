@@ -1,6 +1,8 @@
-from datetime import date
+from datetime import date, datetime, time, timezone
 
+from nlp.feedback import CoachFeedback
 from storage.db import Database
+from storage.models import TurnMetrics
 from storage.progress import ProgressService
 
 
@@ -97,3 +99,71 @@ def test_progress_period_excludes_older_activity(tmp_path):
     assert weekly.words_transcribed == 3
     assert monthly.completed_turns == 2
     assert monthly.words_transcribed == 12
+
+
+def test_one_day_stats_match_week_for_the_same_attempts_and_feedback(tmp_path):
+    today = date.today()
+    timestamp = (
+        datetime.combine(today, time(12)).astimezone(timezone.utc)
+        .replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
+    )
+
+    with Database(tmp_path / "db.sqlite") as db:
+        db.add_completed_turn(
+            "current",
+            "I goed yesterday",
+            "What did you do?",
+            "mistral",
+            100,
+            CoachFeedback(
+                correction="I goed yesterday → I went yesterday",
+                category="verb_tense",
+            ),
+            TurnMetrics(4, 2, True, "verb_tense"),
+        )
+        db.add_interrupted_turn(
+            "interrupted", "I was trying to say", "I think that", "mistral", 100
+        )
+        db.add_message("legacy", "user", "I go yesterday", "mistral", 100)
+        db.add_message(
+            "legacy",
+            "assistant",
+            "Try the past tense. [Correction: I go yesterday → I went yesterday] "
+            "[Category: verb_tense]",
+            "mistral",
+            100,
+        )
+        db.add_recording_duration("current", 120)
+        db.add_recording_duration("interrupted", 60)
+        for table in ("conversations", "feedback", "turn_metrics", "vocab", "recordings"):
+            db.connection.execute(f"UPDATE {table} SET created_at=?", (timestamp,))
+
+        service = ProgressService(db)
+        one_day = service.stats(1, today)
+        one_week = service.stats(7, today)
+
+    comparable_fields = (
+        "practiced_days",
+        "current_streak",
+        "minutes_practiced",
+        "completed_turns",
+        "words_transcribed",
+        "fillers_per_100_words",
+        "transcript_edit_rate",
+        "correction_count",
+        "corrections_by_category",
+        "vocabulary_count",
+    )
+    assert {field: getattr(one_day, field) for field in comparable_fields} == {
+        field: getattr(one_week, field) for field in comparable_fields
+    }
+    assert one_day.practiced_days == 1
+    assert one_day.current_streak == 1
+    assert one_day.minutes_practiced == 3.0
+    assert one_day.completed_turns == 2
+    assert one_day.words_transcribed == 4
+    assert one_day.fillers_per_100_words == 50.0
+    assert one_day.transcript_edit_rate == 1.0
+    assert one_day.correction_count == 2
+    assert one_day.corrections_by_category == {"verb_tense": 1}
+    assert one_day.vocabulary_count == 1

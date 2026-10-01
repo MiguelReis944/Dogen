@@ -1,30 +1,21 @@
 """Dogen's desktop conversation window and background worker."""
 
 import html
-import logging
 import re
-import threading
-import time
 import uuid
-from datetime import date, datetime, time as datetime_time, timedelta, timezone
+from datetime import date
 
-import numpy as np
 from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt5.QtGui import QFont, QKeySequence, QTextCursor
 from PyQt5.QtWidgets import (QAction, QFileDialog, QGroupBox,
                               QHBoxLayout, QLabel, QLineEdit, QMainWindow,
-                              QProgressBar, QPushButton, QSizePolicy, QSplitter,
+                              QMessageBox, QProgressBar, QPushButton, QSizePolicy, QSplitter,
                               QStackedWidget, QTextEdit, QVBoxLayout, QWidget)
 
-from audio.player import Player
-from audio.recorder import Recorder
 from nlp.filler_words import highlight_fillers_html
 from nlp.feedback import CoachFeedback
-from nlp.llm import (SCENARIOS, ConversationContext, OllamaClient,
-                     build_system_prompt)
-from nlp.synthesizer import Synthesizer
-from nlp.transcriber import Transcriber
-from pipeline import ProcessingPipeline, TurnCancelled
+from nlp.llm import SCENARIOS, ConversationContext, build_system_prompt
+from pipeline import TurnCancelled
 from storage.progress import ProgressService
 from ui.pet_widget import PetWidget
 from ui.progress_dialog import ProgressDialog
@@ -32,6 +23,14 @@ from ui.session_summary_dialog import SessionSummaryDialog
 from ui.settings_dialog import SettingsDialog
 from ui.vocab_dialog import VocabDialog
 from ui.dogen_logo import apply_dogen_window_icon, apply_hud_title_bar
+from ui.conversation_worker import ConversationWorker
+from ui.lifecycle import CaptureState, transition
+from utils.diagnostics import (
+    configure_local_diagnostics,
+    disable_local_diagnostics,
+    local_diagnostics_path,
+    log_diagnostic,
+)
 
 FEMALE_VOICE_MODEL = "tts_models/en/ljspeech/tacotron2-DDC"
 
@@ -40,18 +39,6 @@ _CORRECTION_RE = re.compile(r'(\[[A-Z][^:\[\]\n]*:.*?\])', re.DOTALL)
 # How many pixels of RMS maps to 100% on the level meter
 _VOL_SCALE = 600
 _REVIEW_COUNTDOWN_SECONDS = 15
-
-
-def _utc_bounds_for_local_day(local_day: date) -> tuple[str, str]:
-    """Return SQLite-compatible UTC bounds for one local calendar day."""
-    start = datetime.combine(local_day, datetime_time.min).astimezone(timezone.utc)
-    end = datetime.combine(local_day + timedelta(days=1), datetime_time.min).astimezone(
-        timezone.utc
-    )
-    return tuple(
-        value.replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
-        for value in (start, end)
-    )
 
 
 class ModelFetcher(QThread):
@@ -73,264 +60,6 @@ class ModelFetcher(QThread):
             self.models_ready.emit([n for n in names if n])
         except Exception:
             self.models_ready.emit([])
-
-
-class ConversationWorker(QThread):
-    status_message    = pyqtSignal(str)
-    recording_started = pyqtSignal()
-    recording_finished = pyqtSignal(str, float)
-    waiting_for_ptt   = pyqtSignal()
-    transcribed       = pyqtSignal(str)
-    transcript_review = pyqtSignal(str)   # needs user confirmation before LLM
-    response_chunk    = pyqtSignal(str)
-    audio_playing     = pyqtSignal()
-    error             = pyqtSignal(str)
-    ready             = pyqtSignal()
-    turn_completed    = pyqtSignal(object, int)
-    volume_level      = pyqtSignal(float)
-    speech_level      = pyqtSignal(float)   # TTS playback amplitude, drives the pet's mouth
-
-    def __init__(self, config, context, model, pipeline=None, parent=None):
-        super().__init__(parent)
-        self.config = config
-        self.context = context
-        self.model = model
-        self._prebuilt_pipeline = pipeline
-        self.built_pipeline = None
-        self._ptt_start_event = threading.Event()
-        self._ptt_stop_event  = threading.Event()
-        self._barge_in        = False
-        self._playback_active = False
-        self._barge_in_thread: threading.Thread | None = None
-        self._confirm_event   = threading.Event()
-        self._confirmed_text  = ""
-
-    # ── cancellation ───────────────────────────────────────────────────────────
-
-    def _cancelled(self):
-        return self.isInterruptionRequested()
-
-    def _cancelled_or_barge_in(self):
-        return self.isInterruptionRequested() or self._barge_in
-
-    # ── PTT ────────────────────────────────────────────────────────────────────
-
-    def begin_ptt(self):
-        self._ptt_start_event.set()
-
-    def end_ptt(self):
-        self._ptt_stop_event.set()
-
-    def _prepare_ptt_wait(self):
-        self._ptt_start_event.clear()
-        self._ptt_stop_event.clear()
-        self.waiting_for_ptt.emit()
-
-    def confirm_transcript(self, text: str):
-        self._confirmed_text = text
-        self._confirm_event.set()
-
-    def cancel_transcript(self):
-        self._confirmed_text = ""
-        self._confirm_event.set()
-
-    def stop_playback(self):
-        if self._playback_active:
-            self._barge_in = True
-
-    def _make_confirm_fn(self):
-        def _confirm(transcript: str) -> str:
-            self._confirmed_text = transcript
-            self._confirm_event.clear()
-            self.transcript_review.emit(transcript)
-            while not self._cancelled():
-                if self._confirm_event.wait(timeout=0.1):
-                    return self._confirmed_text
-            return ""
-        return _confirm
-
-    # ── barge-in ───────────────────────────────────────────────────────────────
-
-    def _start_barge_in_detector(self):
-        threshold = self.config.vad_threshold * 1.5
-
-        def _listen():
-            consecutive = 0
-            try:
-                import sounddevice as sd
-                with sd.InputStream(samplerate=16000, channels=1, dtype="float32",
-                                    blocksize=1600, device=self.config.mic_device) as stream:
-                    while not self._cancelled_or_barge_in():
-                        block, _ = stream.read(1600)
-                        if not self._playback_active:
-                            consecutive = 0
-                            continue
-                        rms = float(np.sqrt(np.mean(block[:, 0] ** 2)))
-                        if rms > threshold:
-                            consecutive += 1
-                            if consecutive >= 2:
-                                self._barge_in = True
-                                break
-                        else:
-                            consecutive = 0
-            except Exception:
-                pass
-
-        t = threading.Thread(target=_listen, daemon=True)
-        t.start()
-        return t
-
-    # ── progress relay ─────────────────────────────────────────────────────────
-
-    def _emit_progress(self, kind, value):
-        if kind == "transcribed":
-            self.transcribed.emit(value)
-        elif kind == "response_chunk":
-            self.response_chunk.emit(value)
-        elif kind == "audio_playing":
-            self._playback_active = True
-            if self._barge_in_thread is None or not self._barge_in_thread.is_alive():
-                self._barge_in_thread = self._start_barge_in_detector()
-            self.audio_playing.emit()
-        elif kind == "processing":
-            self.status_message.emit(value)
-        elif kind == "empty":
-            self.error.emit(value)
-        elif kind == "speech_volume":
-            try:
-                self.speech_level.emit(float(value))
-            except ValueError:
-                pass
-
-    def _warm_up_llm(self, pipeline) -> bool:
-        while not self._cancelled():
-            try:
-                pipeline.llm.client.list()
-                break
-            except Exception:
-                self.status_message.emit("Waiting for Ollama on localhost:11434...")
-                for _ in range(50):
-                    if self._cancelled():
-                        return False
-                    self.msleep(100)
-        if self._cancelled():
-            return False
-        self.status_message.emit(f"Loading {pipeline.llm.model} into RAM...")
-        try:
-            pipeline.llm.client.generate(
-                model=pipeline.llm.model, prompt="", options={"num_predict": 0},
-                keep_alive=-1,
-            )
-        except Exception as exc:
-            self.error.emit(f"Could not load {pipeline.llm.model}: {exc}")
-            return False
-        return True
-
-    # ── main loop ──────────────────────────────────────────────────────────────
-
-    def run(self):
-        try:
-            if self._prebuilt_pipeline:
-                pipeline = self._prebuilt_pipeline
-                pipeline.llm.model = self.model
-            else:
-                self.status_message.emit("Loading speech recognition…")
-                transcriber = Transcriber(self.config.whisper_model)
-                if self._cancelled():
-                    return
-                self.status_message.emit("Loading voice…")
-                try:
-                    synthesizer = Synthesizer(self.config.tts_model)
-                    synthesizer._speaker = self.config.tts_speaker
-                except FileNotFoundError as exc:
-                    self.error.emit(str(exc))
-                    return
-                if self._cancelled():
-                    return
-                pipeline = ProcessingPipeline(
-                    transcriber,
-                    OllamaClient(self.config.ollama_host, self.model),
-                    synthesizer,
-                    Player(self.config.speaker_device),
-                )
-            self.built_pipeline = pipeline
-
-            recorder = Recorder(
-                self.config.mic_device,
-                self.config.vad_threshold,
-                self.config.silence_duration_sec,
-                self.config.noise_reduction,
-            )
-
-            # Warmup: wait for Ollama and pre-load the model into RAM.
-            if not self._warm_up_llm(pipeline):
-                return
-
-            is_ptt = self.config.input_mode == "ptt"
-
-            while not self._cancelled():
-                # PTT mode: wait for the key press before starting the recorder
-                if is_ptt:
-                    self._prepare_ptt_wait()
-                    while not self._cancelled() and not self._ptt_start_event.wait(timeout=0.1):
-                        pass
-                    if self._cancelled():
-                        return
-
-                self.recording_started.emit()
-                recording = recorder.record(
-                    self._cancelled,
-                    on_volume=lambda rms: self.volume_level.emit(rms),
-                    stop_fn=self._ptt_stop_event.is_set if is_ptt else None,
-                )
-                self.recording_finished.emit(recording.stop_reason, recording.duration_sec)
-
-                if recording.stop_reason == "cancelled" or self._cancelled():
-                    return
-                samples = recording.samples
-                if not samples.size:
-                    self.error.emit("Didn't catch that. Please try again.")
-                    self.ready.emit()
-                    continue
-
-                self._barge_in = False
-                self._playback_active = False
-                started = time.monotonic()
-
-                try:
-                    confirm_fn = self._make_confirm_fn() if self.config.review_transcript else None
-                    result = pipeline.run(
-                        samples, self.context, self._emit_progress,
-                        self._cancelled_or_barge_in,
-                        confirm_fn=confirm_fn,
-                    )
-                    if result:
-                        self.turn_completed.emit(result, int((time.monotonic() - started) * 1000))
-                except TurnCancelled:
-                    self._playback_active = False
-                    if self._barge_in and not self.isInterruptionRequested():
-                        # User started speaking during playback: restart recording immediately
-                        self._barge_in = False
-                        if self._barge_in_thread:
-                            self._barge_in_thread.join(timeout=0.5)
-                            self._barge_in_thread = None
-                        self.ready.emit()
-                        continue
-                    return
-                except Exception as exc:
-                    logging.exception("Conversation turn failed")
-                    self.error.emit(str(exc))
-                finally:
-                    self._playback_active = False
-
-                self.ready.emit()
-
-        except Exception as exc:
-            logging.exception("Worker startup failed")
-            self.error.emit(str(exc))
-        finally:
-            if self._barge_in_thread:
-                self._barge_in_thread.join(timeout=1)
 
 
 class ReplayWorker(QThread):
@@ -355,7 +84,9 @@ class ReplayWorker(QThread):
         except TurnCancelled:
             pass
         except Exception as exc:
-            logging.exception("Response replay failed")
+            log_diagnostic(
+                "turn_failed", stage="playback", error_type=type(exc).__name__
+            )
             self.error.emit(str(exc))
 
 
@@ -390,7 +121,7 @@ class MainWindow(QMainWindow):
         self._response_notice = None
         self._restart_after_settings = False
         self._corrections_on = True
-        self._capture_state = "ready"
+        self._capture_state = CaptureState.READY
         self._record_when_ready = False
         self.status_group = None
 
@@ -562,8 +293,7 @@ class MainWindow(QMainWindow):
         if start_maximized:
             self.setWindowState(self.windowState() | Qt.WindowMaximized)
         if auto_start:
-            self._capture_state = "loading"
-            self.loading_status.setText("Starting local models…")
+            self._set_capture_state(CaptureState.LOADING, "Starting local models…")
             self.record_button.setText("Loading…")
             self.record_button.setEnabled(False)
             self._startup_timer = QTimer(self)
@@ -762,58 +492,20 @@ class MainWindow(QMainWindow):
         self._render_today()
 
     def _render_today(self):
-        today = date.today()
-        connection = self.db.connection
-        day_start, day_end = _utc_bounds_for_local_day(today)
-        recorded_seconds = connection.execute(
-            "SELECT COALESCE(SUM(duration_sec),0) FROM recordings "
-            "WHERE created_at>=? AND created_at<?",
-            (day_start, day_end),
-        ).fetchone()[0]
-        minutes = float(recorded_seconds or 0) / 60
-        turns = connection.execute(
-            "SELECT COUNT(*) FROM conversations WHERE role='user' AND is_complete=1 "
-            "AND created_at>=? AND created_at<?",
-            (day_start, day_end),
-        ).fetchone()[0]
-        words, fillers = connection.execute(
-            "SELECT COALESCE(SUM(word_count),0), COALESCE(SUM(filler_count),0) "
-            "FROM turn_metrics WHERE created_at>=? AND created_at<?",
-            (day_start, day_end),
-        ).fetchone()
-        corrections = self.db.correction_count_between(day_start, day_end)
-        has_activity_today = connection.execute(
-            "SELECT 1 FROM conversations WHERE role='user' AND created_at>=? "
-            "AND created_at<? LIMIT 1",
-            (day_start, day_end),
-        ).fetchone() is not None
-        streak_day = today if has_activity_today else today - timedelta(days=1)
-        streak = 0
-        while True:
-            streak_start, streak_end = _utc_bounds_for_local_day(streak_day)
-            has_activity = connection.execute(
-                "SELECT 1 FROM conversations WHERE role='user' AND created_at>=? "
-                "AND created_at<? LIMIT 1",
-                (streak_start, streak_end),
-            ).fetchone()
-            if has_activity is None:
-                break
-            streak += 1
-            streak_day -= timedelta(days=1)
-        fillers_per_100 = float(fillers) * 100 / words if words else None
+        stats = ProgressService(self.db).stats(1, date.today())
         filler_text = (
-            f"{fillers_per_100:.1f}"
-            if fillers_per_100 is not None
+            f"{stats.fillers_per_100_words:.1f}"
+            if stats.fillers_per_100_words is not None
             else "Not enough data"
         )
         self.today.setText(
-            f"Recorded audio: {minutes:.1f} / "
+            f"Recorded audio: {stats.minutes_practiced:.1f} / "
             f"{self.config.daily_recording_goal_minutes} min\n"
-            f"Words transcribed: {words}\n"
-            f"Completed turns: {turns}\n"
+            f"Words transcribed: {stats.words_transcribed}\n"
+            f"Completed turns: {stats.completed_turns}\n"
             f"Fillers / 100 transcribed words: {filler_text}\n"
-            f"Coach corrections: {corrections}\n"
-            f"Practice streak: {streak}"
+            f"Coach corrections: {stats.correction_count}\n"
+            f"Practice streak: {stats.current_streak}"
         )
 
     # ── history rendering ──────────────────────────────────────────────────────
@@ -884,22 +576,27 @@ class MainWindow(QMainWindow):
 
     def _set_status(self, text: str):
         state = self._capture_state
-        if state not in {"loading", "ready", "recording", "processing", "error"}:
-            state = "ready"
+        if state is CaptureState.SHUTDOWN:
+            return
+        if state not in set(CaptureState):
+            state = CaptureState.READY
         self._set_capture_state(state, text)
 
-    def _set_capture_state(self, state: str, message: str = ""):
-        if state not in {"loading", "ready", "recording", "processing", "error"}:
-            raise ValueError(f"Unknown capture state: {state}")
-        if self._capture_state == "recording" and state != "recording":
+    def _set_capture_state(self, state: CaptureState | str, message: str = ""):
+        next_state = transition(self._capture_state, state)
+        if next_state != self._capture_state:
+            log_diagnostic("state_transition", state=next_state.value)
+        if self._capture_state is CaptureState.RECORDING and next_state is not CaptureState.RECORDING:
             self.pet.set_volume(0)
-        self._capture_state = state
+        self._capture_state = next_state
         if message:
             self.status.setText(message)
         self.capture_stack.setCurrentWidget(
-            self.volume_bar if state == "recording" else self.loading_status
+            self.volume_bar
+            if next_state is CaptureState.RECORDING
+            else self.loading_status
         )
-        if state != "recording":
+        if next_state is not CaptureState.RECORDING:
             self.volume_bar.setValue(0)
 
     def _render_volume(self, rms: float):
@@ -963,11 +660,18 @@ class MainWindow(QMainWindow):
         self._set_capture_state("recording", "Recording — click Finish recording when you're done")
 
     def _on_recording_finished(self, stop_reason: str, duration_sec: float):
+        log_diagnostic(
+            "recording_finished",
+            stop_reason=stop_reason,
+            duration_ms=int(duration_sec * 1000),
+        )
         try:
             self.db.add_recording_duration(self.session_id, duration_sec)
             self._render_today()
-        except Exception:
-            logging.exception("Could not save captured recording duration")
+        except Exception as exc:
+            log_diagnostic(
+                "persistence_error", stage="storage", error_type=type(exc).__name__
+            )
         self._set_capture_state("processing")
         self.record_button.setText("Processing…")
         self.record_button.setEnabled(False)
@@ -1062,6 +766,23 @@ class MainWindow(QMainWindow):
         self._set_status(text)
 
     def _on_completed(self, result, latency_ms):
+        trace_id = getattr(result, "trace_id", None)
+        if result.is_complete:
+            log_diagnostic(
+                "turn_finished", duration_ms=latency_ms, trace_id=trace_id
+            )
+        elif getattr(result, "failure_stage", None) == "tts":
+            log_diagnostic(
+                "turn_interrupted", stage="tts", error_type="PlaybackInterrupted",
+                trace_id=trace_id,
+            )
+        else:
+            log_diagnostic(
+                "turn_failed",
+                stage=getattr(result, "failure_stage", None) or "model",
+                error_type="InterruptedStream",
+                trace_id=trace_id,
+            )
         try:
             if result.is_complete:
                 self.db.add_completed_turn(
@@ -1095,7 +816,10 @@ class MainWindow(QMainWindow):
             self._update_stats()
             self._last_error = None
         except Exception as exc:
-            logging.exception("Could not save conversation turn")
+            log_diagnostic(
+                "persistence_error", stage="storage", error_type=type(exc).__name__,
+                trace_id=trace_id,
+            )
             if len(self.context.messages) >= 2:
                 del self.context.messages[-2:]
             self._render_history()
@@ -1188,6 +912,19 @@ class MainWindow(QMainWindow):
         path = self.settings_path or Path("settings.json")
         dlg = SettingsDialog(self.config, path, parent=self)
         if dlg.exec_():
+            if self.config.diagnostics_enabled:
+                diagnostics_path = local_diagnostics_path()
+                if diagnostics_path is None or not configure_local_diagnostics(
+                    diagnostics_path
+                ):
+                    QMessageBox.warning(
+                        self,
+                        "Diagnostics unavailable",
+                        "Dogen could not create its local diagnostics file. "
+                        "The app will continue without recording diagnostics.",
+                    )
+            else:
+                disable_local_diagnostics()
             self.context.max_history = self.config.context_size
             self._render_today()
             self._pipeline = None
@@ -1210,6 +947,8 @@ class MainWindow(QMainWindow):
         result = dlg.exec_()
         if result == SessionSummaryDialog.NEW_SESSION:
             self.session_id = uuid.uuid4().hex
+            self.db.set_setting("session_date", str(date.today()))
+            self.db.set_setting("session_id", self.session_id)
             self.context.reset()
             self._pipeline = None
             self._last_assistant_text = ""
@@ -1232,16 +971,28 @@ class MainWindow(QMainWindow):
     # ── export ─────────────────────────────────────────────────────────────────
 
     def _export_session(self):
+        message_check = self.db.session_messages(self.session_id)
+        try:
+            first_message = next(message_check, None)
+        finally:
+            message_check.close()
+        if first_message is None:
+            notice = "This session has no messages to export."
+            QMessageBox.information(self, "Export session", notice)
+            self._set_status(notice)
+            return
+
         path, _ = QFileDialog.getSaveFileName(
             self, "Export session", f"dogen-session-{self.session_id[:8]}.txt",
             "Text files (*.txt);;All files (*)"
         )
         if not path:
             return
+        messages = self.db.session_messages(self.session_id)
         try:
             with open(path, "w", encoding="utf-8") as f:
                 last_date = None
-                for m in self.db.session_messages(self.session_id):
+                for m in messages:
                     date = m.created_at[:10] if m.created_at else ""
                     if date != last_date:
                         f.write(f"\n── {date} ──\n")
@@ -1253,6 +1004,8 @@ class MainWindow(QMainWindow):
             self.status.setText(f"Exported to {path}")
         except OSError as exc:
             self.status.setText(f"Export failed: {exc}")
+        finally:
+            messages.close()
 
     # ── close ──────────────────────────────────────────────────────────────────
 
@@ -1264,4 +1017,5 @@ class MainWindow(QMainWindow):
             self.stop()
             event.ignore()
         else:
+            self._set_capture_state(CaptureState.SHUTDOWN)
             event.accept()

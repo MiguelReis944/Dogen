@@ -1,5 +1,6 @@
 import threading
-from unittest.mock import MagicMock
+import re
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -78,6 +79,40 @@ def test_pipeline_emits_empty_on_blank_transcript():
     assert "transcribed" not in kinds
 
 
+def test_pipeline_diagnostics_contain_stage_durations_but_no_conversation_text():
+    private_text = "PRIVATE PHRASE 7391"
+
+    class PrivateTranscriber:
+        def transcribe(self, audio):
+            return private_text
+
+    class PrivateLLM:
+        def generate(self, messages, on_chunk, cancelled):
+            on_chunk("Reply about " + private_text)
+            return "Reply about " + private_text
+
+    pipeline = ProcessingPipeline(
+        PrivateTranscriber(), PrivateLLM(), FakeSynthesizer(), FakePlayer()
+    )
+    context = ConversationContext()
+
+    with patch("pipeline.log_diagnostic") as diagnostic:
+        pipeline.run([0.1], context, lambda *_: None, lambda: False)
+
+    logged_calls = diagnostic.call_args_list
+    stages = {
+        call.kwargs.get("stage")
+        for call in logged_calls
+        if call.args[0] == "stage_completed"
+    }
+    assert {"transcribe", "model", "tts"} <= stages
+    assert all("duration_ms" in call.kwargs for call in logged_calls)
+    trace_ids = {call.kwargs["trace_id"] for call in logged_calls}
+    assert len(trace_ids) == 1
+    assert re.fullmatch(r"[a-f0-9]{32}", trace_ids.pop())
+    assert private_text not in repr(logged_calls)
+
+
 def test_pipeline_respects_cancellation_before_transcription():
     events = []
     context = ConversationContext()
@@ -88,7 +123,7 @@ def test_pipeline_respects_cancellation_before_transcription():
 
 
 def test_pipeline_respects_cancellation_after_tts():
-    """Cancellation between TTS sentences does not persist context."""
+    """Cancellation during TTS returns an interrupted result, not context."""
     events = []
     context = ConversationContext()
     calls = []
@@ -105,10 +140,72 @@ def test_pipeline_respects_cancellation_after_tts():
             cancel_after[0] = True
 
     pipeline = ProcessingPipeline(FakeTranscriber(), FakeLLM(), TwoSentenceSynth(), CancellingPlayer())
-    with pytest.raises(TurnCancelled):
-        pipeline.run([0.1], context, lambda kind, value: events.append((kind, value)), lambda: cancel_after[0])
-    # Context must NOT be updated on a cancelled turn
+    with patch("pipeline.log_diagnostic") as diagnostic:
+        result = pipeline.run(
+            [0.1], context, lambda kind, value: events.append((kind, value)),
+            lambda: cancel_after[0],
+        )
+
+    assert isinstance(result, TurnResult)
+    assert result.transcript == "I goed to school"
+    assert result.reply == "I went to school."
+    assert result.is_complete is False
+    assert result.error == "Response playback interrupted"
+    assert result.failure_stage == "tts"
+    assert not any(
+        call.args[0] == "turn_failed" and call.kwargs.get("stage") == "model"
+        for call in diagnostic.call_args_list
+    )
     assert context.messages == []
+
+
+def test_pipeline_returns_interrupted_result_when_llm_fails_before_first_token():
+    class BrokenLLM:
+        def generate(self, messages, on_chunk, cancelled):
+            raise RuntimeError("stream disconnected before first token")
+
+    context = ConversationContext()
+    pipeline = ProcessingPipeline(
+        FakeTranscriber(), BrokenLLM(), FakeSynthesizer(), FakePlayer()
+    )
+
+    with patch("pipeline.log_diagnostic") as diagnostic:
+        result = pipeline.run([0.1], context, lambda *_: None, lambda: False)
+
+    assert isinstance(result, TurnResult)
+    assert result.transcript == "I goed to school"
+    assert result.reply == ""
+    assert result.is_complete is False
+    assert result.error == "stream disconnected before first token"
+    assert result.metrics.word_count == 4
+    assert result.failure_stage == "model"
+    assert any(
+        call.args[0] == "turn_failed" and call.kwargs.get("stage") == "model"
+        for call in diagnostic.call_args_list
+    )
+    assert context.messages == []
+
+
+def test_pipeline_transcription_failure_uses_transcribe_diagnostic_stage():
+    class BrokenTranscriber:
+        def transcribe(self, _audio):
+            raise RuntimeError("recognizer unavailable")
+
+    pipeline = ProcessingPipeline(
+        BrokenTranscriber(), FakeLLM(), FakeSynthesizer(), FakePlayer()
+    )
+    with patch("pipeline.log_diagnostic") as diagnostic:
+        with pytest.raises(RuntimeError, match="recognizer unavailable"):
+            pipeline.run([0.1], ConversationContext(), lambda *_: None, lambda: False)
+
+    assert any(
+        call.args[0] == "turn_failed" and call.kwargs.get("stage") == "transcribe"
+        for call in diagnostic.call_args_list
+    )
+    assert not any(
+        call.args[0] == "turn_failed" and call.kwargs.get("stage") == "model"
+        for call in diagnostic.call_args_list
+    )
 
 
 def test_pipeline_cancellation_interrupts_wait_for_first_llm_chunk():

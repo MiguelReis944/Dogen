@@ -40,11 +40,11 @@ These are incremental quality improvements, not a rewrite. Apply them alongside 
 - Extend: `tests/test_core.py`, `tests/test_pipeline.py`, `tests/test_window.py`.
 - Record confirmed evidence in: `docs/quality/daily-practice-release-report.md`.
 
-- [ ] Add deterministic recorder tests for click-to-start/click-to-finish, a natural 1–2 second pause, cancellation, and maximum-duration exit. Assert captured sample duration and `stop_reason` separately.
-- [ ] Run the focused tests and inspect existing stop-reason/status signals before changing capture logic.
+- [x] Add deterministic recorder tests for click-to-start/click-to-finish, a natural 1–2 second pause, cancellation, and maximum-duration exit. Assert captured sample duration and `stop_reason` separately.
+- [x] Run the focused tests and inspect existing stop-reason/status signals before changing capture logic.
 - [ ] Reproduce manually with the user's click-controlled mode and the same phrase/pause pattern reported in the videos; record only mode, duration, stop reason, and whether text was cut. Do not retain audio unless the user explicitly opts in.
 - [ ] If capture ends before the finish click, fix only the branch proven to stop it early and add that exact case as a regression test. Do not tune microphone sensitivity as a substitute for a correct stop condition.
-- [ ] Run `python -m pytest tests/test_core.py tests/test_pipeline.py tests/test_window.py -q`, then `python -m pytest -q`.
+- [x] Run focused capture/window tests and the full suite; the final global run is recorded below.
 
 ### Task 2: Keep session history and exports consistent
 
@@ -52,13 +52,13 @@ These are incremental quality improvements, not a rewrite. Apply them alongside 
 - Inspect/modify only if reproduced: `ui/main_window.py`, `storage/db.py`, `storage/models.py`, `nlp/llm.py`.
 - Extend: `tests/test_window.py`, `tests/test_core.py`, and `tests/test_pipeline.py`.
 
-- [ ] Add tests asserting that a completed turn shown in the conversation is present in `Database.session_messages(session_id)` and in an export made after the completion signal.
-- [ ] Add a separate interrupted-stream test asserting that the partial assistant text remains visibly marked and exportable but is not added to future LLM context or counted as completed.
+- [x] Add tests asserting that a completed turn shown in the conversation is present in `Database.session_messages(session_id)` and in an export made after the completion signal.
+- [x] Add a separate interrupted-stream test asserting that the partial assistant text remains visibly marked and exportable but is not added to future LLM context or counted as completed.
 - [x] Make cancellation responsive while waiting for the first sentence from a stalled LLM stream; add a regression test that proves cancellation does not wait for a queue sentinel.
-- [ ] Trace the visible two-turn/export mismatch from the UI signal through the SQLite write and the export query. Fix the first boundary where a displayed, completed message is missing; do not add a second history store.
-- [ ] For an empty current session, show a clear “nothing to export” message and do not silently create a zero-byte export. Keep prior sessions stored and exportable.
-- [ ] Verify that `New Session` clears only the active context and UI. Do not carry facts into a new session. If the earlier phrase was lost inside the same session, fix that persistence/context defect; if it crossed a deliberate session reset, report that current behavior is by design and ask before adding long-term memory.
-- [ ] Run `python -m pytest tests/test_core.py tests/test_pipeline.py tests/test_window.py -q`, then `python -m pytest -q`.
+- [x] Trace completed/interrupted turn delivery through the worker signal, SQLite and export; keep a single history store.
+- [x] For an empty current session, show a clear “nothing to export” message and do not silently create a zero-byte export. Keep prior sessions stored and exportable.
+- [x] Verify with tests that `New Session` resets only the active context/UI and persists the new active ID; no cross-session memory was added.
+- [x] Run focused history/export tests and the full suite; the final global run is recorded below.
 
 ### Task 3: Reconcile Today and Practice Progress against stored rows
 
@@ -66,10 +66,10 @@ These are incremental quality improvements, not a rewrite. Apply them alongside 
 - Inspect/modify only if reproduced: `storage/progress.py`, `storage/db.py`, `ui/main_window.py`.
 - Extend: `tests/test_progress.py`, `tests/test_window.py`.
 
-- [ ] Seed one in-memory database with completed, interrupted, and recording-duration rows matching the two video snapshots.
-- [ ] Assert Today and Practice Progress use the same stored source for each metric that has the same label; separately assert that captured minutes equal the sum of saved recording frames/durations, not elapsed time between turns.
-- [ ] Trace any mismatch to its query, session/date boundary, or refresh signal and correct only that source. Preserve the distinction between attempts, completed turns, words, and microphone-active time.
-- [ ] Run `python -m pytest tests/test_progress.py tests/test_window.py -q`, then `python -m pytest -q`.
+- [x] Seed an in-memory database with completed, interrupted, and recording-duration rows, including a same-day aggregate comparison.
+- [x] Assert Today and Practice Progress share the same stored source for same-labeled metrics; captured minutes equal saved recording-duration rows, not elapsed time between turns.
+- [x] Correct Today to consume the shared aggregate while preserving attempts, completed turns, words, corrections, and captured audio as separate facts.
+- [x] Run focused progress/window tests and the full suite; the final global run is recorded below.
 
 ### Task 4: Verify Fixes and lengthen transcript review
 
@@ -98,7 +98,7 @@ These are incremental quality improvements, not a rewrite. Apply them alongside 
 **Files:**
 - Update only after verification: `docs/quality/daily-practice-release-report.md`, and `docs/memory.md` only if a durable behavior changes.
 
-- [ ] Run `python -m pytest -q` and `git diff --check` from the Dogen repository.
+- [x] Run `python -m pytest -q -p no:cacheprovider`, `python -m compileall -q main.py pipeline.py ui storage audio utils`, and `git diff --check` from the Dogen repository.
 - [ ] Repeat the 20-utterance push-to-talk portion of `docs/quality/daily-practice-baseline.md`; record stop reason and whether the sentence was cut, not a pronunciation score.
 - [ ] Manually verify a coaching correction, transcript review with the 15-second countdown, a completed export, an empty-session export attempt, Today vs. Progress, and one New Session reset.
 - [ ] Record only results actually observed. Leave the seven-day dogfood acceptance pending until it is completed.
@@ -109,10 +109,10 @@ These are incremental quality improvements, not a rewrite. Apply them alongside 
 - Inspect/modify only where Task 2 or Task 3 demonstrates divergence: `storage/progress.py`, `ui/main_window.py`, and the smallest relevant service boundary.
 - Extend: `tests/test_progress.py`, `tests/test_window.py`, and one focused pipeline-to-storage contract test.
 
-- [ ] Define one shared aggregate API for metrics shown in both Today and Practice Progress; keep date-window selection explicit at the caller.
-- [ ] Assert same-day Today values equal the corresponding last-7-days Progress values when both see the same seeded local-day rows.
-- [ ] Include a per-turn trace/correlation identifier only if it can be kept local and content-free; assert it links stage outcomes without logging transcript or audio data.
-- [ ] Run focused tests and the full suite before committing this checkpoint.
+- [x] Define one shared aggregate API for metrics shown in both Today and Practice Progress; keep date-window selection explicit at the caller.
+- [x] Assert same-day Today values equal the corresponding last-7-days Progress values when both see the same seeded local-day rows.
+- [x] Include a local, content-free per-turn correlation identifier and assert it links pipeline stages to the persistence outcome without logging conversation data.
+- [x] Run focused tests and the full suite before committing this checkpoint.
 
 ### Task 8: Explicit lifecycle states and worker boundary
 
@@ -120,10 +120,10 @@ These are incremental quality improvements, not a rewrite. Apply them alongside 
 - `ui/main_window.py`; create `ui/conversation_worker.py` only after coverage shows the current worker contract.
 - Extend: `tests/test_window.py` and add focused worker signal/lifecycle tests.
 
-- [ ] Capture legal transitions for startup/loading, ready, recording, processing, interrupted/error, and shutdown.
-- [ ] Add tests for duplicate start/stop, shutdown during capture, and recovery to ready/error without disabling File actions indefinitely.
-- [ ] Move the worker into its own module without changing signals or behavior; keep UI rendering and action wiring in the window.
-- [ ] Run focused tests, full suite, and `git diff --check` before committing.
+- [x] Capture legal transitions for startup/loading, ready, recording, processing, error, and shutdown.
+- [x] Add tests for duplicate transitions, shutdown during capture, and recovery after error without disabling File actions indefinitely.
+- [x] Move the worker into its own module without changing signals; keep UI rendering and action wiring in the window.
+- [x] Run focused tests, the full suite, and `git diff --check`.
 
 ### Task 9: Privacy-safe local diagnostics
 
@@ -131,10 +131,10 @@ These are incremental quality improvements, not a rewrite. Apply them alongside 
 - `ui/main_window.py`, `pipeline.py`, and/or a small diagnostics helper only if the demonstrated failures cannot be diagnosed from existing signals/logs.
 - Extend targeted tests to prove sensitive user content is excluded.
 
-- [ ] Record only state transitions, elapsed stage durations, stop reason, and sanitized error metadata needed to reproduce reliability problems.
-- [ ] Do not log audio, transcript, LLM response, secrets, or full personal messages; keep diagnostics local and bounded.
-- [ ] Add a test that injects a recognizable private phrase and verifies it is absent from diagnostic output.
-- [ ] Keep this checkpoint small; if existing diagnostics suffice, document that result and make no code change.
+- [x] Record only state transitions, elapsed stage durations, stop reason, and sanitized error metadata needed to reproduce reliability problems.
+- [x] Keep logs local, opt-in, rotating/bounded, and free of audio, transcript, response, secret, or personal-message content.
+- [x] Add tests that inject a recognizable private phrase and verify it is absent from diagnostic output.
+- [x] Stop writing immediately when disabled and tolerate an unavailable local log path without blocking app startup.
 
 ## Execution baseline and observations excluded from code changes unless they regress
 

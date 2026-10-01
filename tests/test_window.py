@@ -13,7 +13,7 @@ from nlp.feedback import CoachFeedback
 from pipeline import TurnResult
 from storage.db import Database
 from storage.models import TurnMetrics
-from storage.progress import ProgressStats
+from storage.progress import ProgressService, ProgressStats
 from ui.main_window import ConversationWorker, MainWindow
 from ui.session_summary_dialog import SessionSummaryDialog
 from ui.progress_dialog import ProgressDialog
@@ -819,6 +819,20 @@ def test_completed_turn_renders_and_persists_feedback_separately(tmp_path):
         assert window.status_group is None
         assert db.feedback_for_session("session") == [result.feedback]
         assert db.recent_messages("session", 2)[1].content == "What did you do there?"
+        persisted = db.session_messages("session")
+        assert [(message.role, message.content) for message in persisted] == [
+            ("user", "I goed home"),
+            ("assistant", "What did you do there?"),
+        ]
+        exported_path = tmp_path / "completed-turn.txt"
+        with patch(
+            "ui.main_window.QFileDialog.getSaveFileName",
+            return_value=(str(exported_path), ""),
+        ):
+            window._export_session()
+        exported = exported_path.read_text(encoding="utf-8")
+        assert "You: I goed home" in exported
+        assert "Dogen: What did you do there?" in exported
         window.close()
 
 
@@ -882,6 +896,36 @@ def test_today_uses_configured_recording_goal(tmp_path):
         window.close()
 
 
+def test_today_renders_the_shared_one_day_progress_aggregate(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    stats = ProgressStats(
+        period_days=1,
+        practiced_days=1,
+        current_streak=2,
+        minutes_practiced=3.5,
+        completed_turns=2,
+        words_transcribed=12,
+        fillers_per_100_words=8.3,
+        transcript_edit_rate=0.5,
+        corrections_by_category={"verb_tense": 1},
+        vocabulary_count=1,
+        correction_count=2,
+    )
+    with Database(tmp_path / "conversation.db") as db:
+        with patch.object(ProgressService, "stats", return_value=stats) as aggregate:
+            window = _make_window(db)
+        aggregate.assert_called_once_with(1, date.today())
+
+        summary = window.today.text()
+        assert "Recorded audio: 3.5 / 15 min" in summary
+        assert "Words transcribed: 12" in summary
+        assert "Completed turns: 2" in summary
+        assert "Fillers / 100 transcribed words: 8.3" in summary
+        assert "Coach corrections: 2" in summary
+        assert "Practice streak: 2" in summary
+        window.close()
+
+
 def test_today_refreshes_after_settings_goal_changes(tmp_path):
     app = QApplication.instance() or QApplication([])
     with Database(tmp_path / "conversation.db") as db:
@@ -942,7 +986,7 @@ def test_today_includes_turns_after_21_local_when_utc_date_has_advanced(tmp_path
                 (utc_created_at, "session"),
             )
         monkeypatch.setattr("ui.main_window.date", FixedDate)
-        monkeypatch.setattr("ui.main_window.datetime", SaoPauloDateTime)
+        monkeypatch.setattr("storage.progress.datetime", SaoPauloDateTime)
         window = _make_window(db)
 
         summary = window.today.text().lower()
