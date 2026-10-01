@@ -453,11 +453,14 @@ def test_format_message_keeps_corrections_out_of_conversation(tmp_path):
             "assistant",
             "Good try! [Correction: I goed → I went] [Better phrasing: I went to school]"
         )
-        assert html == '<b>Dogen:</b> Good try!'
+        assert html == (
+            '<span style="color:#58d68d"><b>Dogen:</b></span> '
+            '<span style="color:#e6edf3">Good try!</span>'
+        )
         window.close()
 
 
-def test_format_message_user_role_no_colors(tmp_path):
+def test_format_message_user_role_colors_speaker_only(tmp_path):
     app = QApplication.instance() or QApplication([])
     with Database(tmp_path / "conversation.db") as db:
         window = _make_window(db)

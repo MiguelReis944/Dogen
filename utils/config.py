@@ -23,12 +23,15 @@ class AppConfig:
     daily_recording_goal_minutes: int = 15
     practice_font_size_px: int = 15
     input_mode: str = "ptt"  # "vad" | "ptt"
-    review_transcript: bool = False  # show editable transcript before sending to LLM
+    review_transcript: bool = True  # show editable transcript before sending to LLM
+    review_transcript_auto_send_seconds: int | None = 15  # None waits for manual confirmation
     noise_reduction: bool = True
     diagnostics_enabled: bool = False  # opt-in, local reliability metadata only
     system_prompt: str = SYSTEM_PROMPT
 
     def __post_init__(self):
+        if self.review_transcript_auto_send_seconds not in (None, 10, 15, 30):
+            self.review_transcript_auto_send_seconds = 15
         url = urlparse(self.ollama_host)
         if url.scheme != "http" or url.hostname not in {"localhost", "127.0.0.1", "::1"}:
             raise ValueError("Ollama host must be an http://localhost address for offline use")

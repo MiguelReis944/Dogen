@@ -20,7 +20,7 @@ O modo de gravação é controlado por cliques: um clique começa e outro termin
 
 A conversa ocupa o painel principal. **Fixes** mostra correções e frases alternativas sem poluir o diálogo, e **Status** mostra o estágio atual. Ações secundárias, seleção de cenário e seleção de modelo ficam no menu **File**. A narração usa somente a voz feminina local.
 
-Em **Settings**, ative **Review transcript before sending** para corrigir o texto reconhecido antes de enviá-lo ao coach; a revisão é enviada automaticamente depois de 15 segundos se você não confirmar antes.
+Em **Settings**, **Review transcript before sending** vem ativado por padrão para você conferir e editar o texto reconhecido antes de enviá-lo ao coach. Você pode escolher o envio automático depois de 10, 15 ou 30 segundos, ou selecionar **Never** para confirmar manualmente. Também há um ícone de ajuda ao lado das opções para explicar cada configuração.
 
 Depois de uma resposta completa, use **Replay response** para ouvi-la novamente ou **Stop audio** para interromper a fala. Repetir uma resposta não cria outro turno, não chama o Ollama e não altera as estatísticas.
 
@@ -81,7 +81,8 @@ opinião do LLM não são substitutos honestos.
 | `vad_threshold` | `0.02` | sensibilidade base do detector de voz |
 | `silence_duration_sec` | `2.0` | valor legado preservado para compatibilidade de configuração |
 | `input_mode` | `ptt` | valor legado; a interface usa gravação manual por cliques |
-| `review_transcript` | `false` | permite editar a transcrição antes de enviá-la |
+| `review_transcript` | `true` | permite conferir e editar a transcrição antes de enviá-la; configs existentes com `false` continuam desativadas |
+| `review_transcript_auto_send_seconds` | `15` | envia a transcrição revisada após 10, 15 ou 30 segundos; `null` significa **Never** (confirmação manual) |
 | `noise_reduction` | `true` | aplica redução de ruído depois da captura; pode ser desligada para comparar clareza |
 | `diagnostics_enabled` | `false` | grava eventos locais de confiabilidade, sem áudio nem transcrições |
 | `context_size` | `10` | pares de mensagens mantidos em contexto |

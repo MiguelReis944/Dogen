@@ -5,7 +5,7 @@ import uuid
 from datetime import date
 
 from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
-from PyQt5.QtGui import QFont, QKeySequence, QTextCharFormat, QTextCursor, QTextFormat
+from PyQt5.QtGui import QColor, QFont, QKeySequence, QTextCharFormat, QTextCursor, QTextFormat
 from PyQt5.QtWidgets import (QAction, QFileDialog, QGroupBox,
                               QHBoxLayout, QLabel, QLineEdit, QMainWindow,
                               QMessageBox, QProgressBar, QPushButton, QSizePolicy, QSplitter,
@@ -34,7 +34,6 @@ FEMALE_VOICE_MODEL = "tts_models/en/ljspeech/tacotron2-DDC"
 
 # How many pixels of RMS maps to 100% on the level meter
 _VOL_SCALE = 600
-_REVIEW_COUNTDOWN_SECONDS = 15
 
 
 class ModelFetcher(QThread):
@@ -208,7 +207,7 @@ class MainWindow(QMainWindow):
         self._review_edit.setPlaceholderText("Transcript — edit if needed, then press Enter")
         self._review_edit.returnPressed.connect(self._on_confirm_transcript)
         self._review_countdown = QLabel("")
-        self._review_countdown.setStyleSheet("color: #888; font-size: 12px; min-width: 28px;")
+        self._review_countdown.setStyleSheet("color: #888; font-size: 12px; min-width: 42px;")
         confirm_btn = QPushButton("✓ Send")
         confirm_btn.setToolTip("Send this transcript to Dogen now")
         confirm_btn.setMinimumWidth(80)
@@ -259,7 +258,7 @@ class MainWindow(QMainWindow):
         self._review_timer = QTimer(self)
         self._review_timer.setInterval(1000)
         self._review_timer.timeout.connect(self._review_tick)
-        self._review_seconds_left = 0
+        self._review_seconds_left: int | None = None
 
         self._today_refresh_timer = QTimer(self)
         self._today_refresh_timer.setInterval(60_000)
@@ -524,7 +523,11 @@ class MainWindow(QMainWindow):
         if role == "assistant":
             content = strip_coaching_markup(content)
         escaped = html.escape(content)
-        return f"<b>{label}:</b> {escaped}"
+        label_color = "#75baff" if role == "user" else "#58d68d"
+        return (
+            f'<span style="color:{label_color}"><b>{html.escape(label)}:</b></span> '
+            f'<span style="color:#e6edf3">{escaped}</span>'
+        )
 
     def _render_history(self):
         self.history.clear()
@@ -709,19 +712,32 @@ class MainWindow(QMainWindow):
             self._set_status(self._response_notice or self._idle_instruction())
 
     def _on_transcript_review(self, text: str):
-        """Show the editable review bar with a 15-second auto-confirm countdown."""
+        """Show the editable transcript and its configured auto-send behavior."""
         self._review_edit.setText(text)
-        self._review_seconds_left = _REVIEW_COUNTDOWN_SECONDS
-        self._review_countdown.setText(f"{self._review_seconds_left}s")
         self._review_bar.setVisible(True)
         self._review_edit.setFocus()
         self._review_edit.selectAll()
-        self._review_timer.start()
-        self._set_status(
-            f"Edit the transcript, then send or retry · sending in {_REVIEW_COUNTDOWN_SECONDS}s"
-        )
+        auto_send_seconds = getattr(self.config, "review_transcript_auto_send_seconds", 15)
+        if auto_send_seconds in (10, 15, 30):
+            self._review_seconds_left = auto_send_seconds
+            self._review_countdown.setText(f"{auto_send_seconds}s")
+            self._review_timer.start()
+            self._set_status(
+                f"Edit the transcript, then send or retry · sending in {auto_send_seconds}s"
+            )
+        else:
+            self._review_timer.stop()
+            self._review_seconds_left = None
+            self._review_countdown.setText("Never")
+            self._set_status(
+                "Review the transcript, then send or retry · automatic sending is off"
+            )
 
     def _review_tick(self):
+        if self._review_seconds_left is None:
+            self._review_timer.stop()
+            self._review_countdown.setText("Never")
+            return
         self._review_seconds_left -= 1
         if self._review_seconds_left <= 0:
             self._on_confirm_transcript()
@@ -741,8 +757,8 @@ class MainWindow(QMainWindow):
             self.worker.cancel_transcript()
 
     def _on_transcribed(self, text):
-        self.history.append(f"You: {text}")
-        self._append("\nDogen: ")
+        self.history.append(self._format_message("user", text))
+        self._append_role_label("Dogen", "#58d68d")
         self._assistant_open = True
         self.pet.set_state("thinking")
         self._set_capture_state("processing")
@@ -854,10 +870,25 @@ class MainWindow(QMainWindow):
 
     # ── text append ────────────────────────────────────────────────────────────
 
+    def _append_role_label(self, label, color):
+        cursor = self.history.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        neutral = QTextCharFormat()
+        neutral.setForeground(self.history.palette().text())
+        cursor.insertText("\n", neutral)
+        label_format = QTextCharFormat()
+        label_format.setForeground(QColor(color))
+        label_format.setFontWeight(QFont.Bold)
+        cursor.insertText(f"{label}: ", label_format)
+        self.history.setTextCursor(cursor)
+        self.history.ensureCursorVisible()
+
     def _append(self, text):
         cursor = self.history.textCursor()
         cursor.movePosition(QTextCursor.End)
-        cursor.insertText(text)
+        neutral = QTextCharFormat()
+        neutral.setForeground(self.history.palette().text())
+        cursor.insertText(text, neutral)
         self.history.setTextCursor(cursor)
         self.history.ensureCursorVisible()
 

@@ -21,4 +21,6 @@ linha; contagens de palavras e fillers são descritas como transcritas/estimadas
 
 A janela PyQt5 é densa e orientada por estados: o botão de gravação e a região de
 status precisam indicar claramente quando a captura está disponível, ativa ou encerrada.
+As falas de usuário e Dogen usam cores distintas nos rótulos, mantendo o texto da conversa
+neutro. Cada configuração tem um botão `?` com explicação curta.
 Detalhes da evolução de aprendizagem estão no design datado vinculado em `architecture.md`.

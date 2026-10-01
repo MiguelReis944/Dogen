@@ -35,9 +35,17 @@ somente as durações das etapas e o resultado de persistência de um turno.
 
 ## Decisões técnicas vigentes
 
-Gravação usa cliques para começar e terminar; revisão de transcrição tem timeout de
-15 segundos; a voz TTS exposta é a feminina local. A direção futura do domínio está
+Gravação usa cliques para começar e terminar, com limite de segurança atual de 60
+segundos por captura. Whisper só recebe o áudio depois que a captura termina; em seguida
+o texto transcrito é enviado ao Ollama. O modelo é aquecido na inicialização e mantido
+carregado. A revisão da transcrição vem ativada por padrão e pode enviar automaticamente
+após 10, 15 ou 30 segundos, ou aguardar confirmação manual. A voz TTS exposta é a feminina
+local. A direção futura do domínio está
 em `docs/design/2026-09-27-learning-system-design.md`, não substitui a implementação.
+
+O Ollama recebe texto, não a gravação. O contexto de geração está fixado em 4.096 tokens;
+esse espaço é compartilhado pelas instruções, histórico, transcrição atual e resposta.
+O parâmetro de máximo de tokens gerados não é enviado pelo cliente.
 
 A resposta em streaming remove anotações de coaching antes de segmentar frases ou
 exibi-las. Fixes recebe somente pares de correção vinculados à transcrição do turno;

@@ -14,7 +14,9 @@ persiste o histórico em SQLite.
 ## Requisitos
 
 - Iniciar com diagnósticos acionáveis para microfone, modelos e Ollama ausentes.
-- Permitir gravação manual por clique, revisão opcional da transcrição e cancelamento.
+- Permitir gravação manual por clique, revisão da transcrição ativada por padrão, envio
+  automático após 10, 15 ou 30 segundos ou confirmação manual sem prazo, e cancelamento.
+- Explicar cada configuração com ajuda contextual acessível junto ao controle.
 - Responder em inglês com uma correção breve para cada erro significativo, separada do diálogo e exibida como texto somente de leitura. Não inventar correções para frases naturais.
 - Restaurar a sessão do dia e oferecer replay/stop sem criar turnos extras.
 - Mostrar progresso sem chamar atividade de proficiência ou inventar nota de pronúncia.

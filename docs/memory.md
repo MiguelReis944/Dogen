@@ -8,6 +8,9 @@
 - A tela principal prioriza conversa: Today é passivo e a meta de gravação é configurável
   em Settings (15 minutos por padrão), baseada nos frames realmente capturados; Fixes é
   somente leitura; volume aparece durante gravação.
+- A revisão da transcrição é ativada por padrão; Settings oferece envio automático em
+  10, 15 ou 30 segundos, ou revisão manual sem envio automático. A captura ainda tem um
+  teto de 60 segundos por fala; ele é independente do contexto do Ollama.
 - O modo Fluency muda o estilo conversacional, mas não desativa correções de erros
   significativos em inglês. Fixes mostra texto breve, sem controles de correção; não se
   inventam correções para frases naturais.
