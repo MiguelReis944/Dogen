@@ -11,7 +11,6 @@ from PyQt5.QtWidgets import (QAction, QFileDialog, QGroupBox,
                               QMessageBox, QProgressBar, QPushButton, QSizePolicy, QSplitter,
                               QStackedWidget, QTextEdit, QVBoxLayout, QWidget)
 
-from nlp.filler_words import highlight_fillers_html
 from nlp.feedback import CoachFeedback, parse_reply, strip_coaching_markup
 from nlp.llm import SCENARIOS, ConversationContext, build_system_prompt
 from pipeline import TurnCancelled
@@ -525,8 +524,6 @@ class MainWindow(QMainWindow):
         if role == "assistant":
             content = strip_coaching_markup(content)
         escaped = html.escape(content)
-        if role == "user":
-            escaped = highlight_fillers_html(escaped)
         return f"<b>{label}:</b> {escaped}"
 
     def _render_history(self):
