@@ -18,9 +18,9 @@
 
 3. Inicie o Ollama localmente. Em outra janela, execute `python main.py`.
 
-4. Aguarde o carregamento automático de Whisper, voz e Ollama. Quando **Start recording** for liberado, clique para começar a falar e em **Finish recording** para enviar o áudio. O Dogen usa o dispositivo padrão de entrada e saída. Para escolher outros dispositivos, edite `mic_device` / `speaker_device` em `settings.json` com os índices retornados por `python -m sounddevice`.
+4. Aguarde Whisper e a voz local carregarem. Em **File → Model**, selecione um dos modelos Ollama instalados e escolha **Load selected model**; nenhum LLM é carregado automaticamente. Quando a ação terminar, clique em **Start recording** e depois em **Finish recording** para enviar o áudio. O Dogen usa o dispositivo padrão de entrada e saída. Para escolher outros dispositivos, edite `mic_device` / `speaker_device` em `settings.json` com os índices retornados por `python -m sounddevice`.
 
-Após a preparação, o Dogen usa apenas o Ollama em `localhost:11434` e modelos instalados localmente. Se Whisper não estiver em cache, o aplicativo mostra uma mensagem com este guia. O Coqui também precisa estar em cache antes do uso offline.
+Após a preparação, o Dogen usa apenas o Ollama em `localhost:11434` e modelos instalados localmente. O menu **File → Model** mostra quais modelos estão residentes e a VRAM global que o Ollama reporta. Trocar o modelo descarrega o anteriormente ativado pelo Dogen; a retenção normal é de cinco minutos após o último pedido. A ação para descarregar outros modelos pede confirmação porque o servidor é compartilhado com outros aplicativos. Se Whisper não estiver em cache, o aplicativo mostra uma mensagem com este guia. O Coqui também precisa estar em cache antes do uso offline.
 
 **GPU (opcional):** o `start.bat` instala PyTorch CPU por padrão. Para usar a GPU e acelerar TTS e Whisper, instale a versão CUDA manualmente após o setup:
 ```powershell

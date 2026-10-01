@@ -58,7 +58,8 @@ def _run_worker(monkeypatch, playback_action):
     monkeypatch.setattr(ConversationWorker, "_warm_up_llm", lambda _self, _pipeline: True)
     monkeypatch.setattr("ui.conversation_worker.Recorder", FakeRecorder)
     worker = ConversationWorker(
-        AppConfig(input_mode="ptt"), ConversationContext(), "mistral", pipeline=pipeline
+        AppConfig(input_mode="ptt"), ConversationContext(), "mistral", pipeline=pipeline,
+        active_model="mistral",
     )
 
     wait_count = 0

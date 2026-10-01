@@ -39,7 +39,8 @@ def test_conversation_worker_preserves_recording_and_turn_signal_contract(monkey
             return result
 
     worker = ConversationWorker(
-        AppConfig(input_mode="ptt"), object(), "mistral", pipeline=FakePipeline()
+        AppConfig(input_mode="ptt"), object(), "mistral", pipeline=FakePipeline(),
+        active_model="mistral",
     )
     worker._warm_up_llm = lambda _pipeline: True
     events = {name: [] for name in (
@@ -97,7 +98,8 @@ def test_capture_failure_is_diagnosed_as_capture_not_startup(monkeypatch):
     monkeypatch.setattr("ui.conversation_worker.Recorder", BrokenRecorder)
     pipeline = SimpleNamespace(llm=SimpleNamespace(model="mistral"))
     worker = ConversationWorker(
-        AppConfig(input_mode="ptt"), object(), "mistral", pipeline=pipeline
+        AppConfig(input_mode="ptt"), object(), "mistral", pipeline=pipeline,
+        active_model="mistral",
     )
     worker._warm_up_llm = lambda _pipeline: True
     failures = []

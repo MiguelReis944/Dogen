@@ -12,7 +12,9 @@ start.bat
 
 Para setup manual, veja [docs/SETUP.md](docs/SETUP.md).
 
-Ao abrir, Dogen maximiza a janela e carrega automaticamente Whisper, a voz local e o modelo do Ollama. As etapas aparecem na região do medidor; a gravação não começa sozinha. Quando **Start recording** for liberado, clique para começar a falar e depois em **Finish recording** para enviar.
+Ao abrir, Dogen maximiza a janela e carrega automaticamente Whisper e a voz local. Ele consulta os modelos instalados do Ollama, mas não carrega um LLM por conta própria: em **File → Model**, confira a última escolha (ou escolha outro modelo) e selecione **Load selected model**. Quando o carregamento terminar, use **Start recording** e depois **Finish recording** para enviar a fala.
+
+O menu **Model** distingue o modelo selecionado, o que Dogen usará na próxima resposta, o modelo usado na última resposta e os modelos que o Ollama mantém residentes. O uso de VRAM é global ao Ollama e pode incluir outros aplicativos. Ao trocar, Dogen descarrega o modelo que ele ativou antes de carregar o novo; chamadas mantêm o modelo por até cinco minutos de inatividade. **Unload other models and load selected…** pode liberar modelos residentes antigos, mas pede confirmação porque afeta todos os aplicativos conectados ao Ollama.
 
 ## Prática diária
 
@@ -27,7 +29,7 @@ Depois de uma resposta completa, use **Replay response** para ouvi-la novamente 
 ## Pipeline de um turno
 
 ```
-microfone → VAD adaptativo → Whisper (small.en) → Ollama/Mistral
+microfone → VAD adaptativo → Whisper (small.en) → Ollama/modelo selecionado
   → Coqui TTS (por sentença) → reprodução
 ```
 
@@ -75,7 +77,7 @@ opinião do LLM não são substitutos honestos.
 
 | Chave | Padrão | Descrição |
 |---|---|---|
-| `ollama_model` | `mistral` | modelo LLM no Ollama |
+| `ollama_model` | `mistral` | preferência inicial para seleção; o último modelo escolhido fica salvo localmente |
 | `whisper_model` | `small.en` | modelo Whisper (english-only, melhor precisão) |
 | `tts_model` | `tts_models/en/ljspeech/tacotron2-DDC` | voz feminina fixa do Coqui TTS |
 | `vad_threshold` | `0.02` | sensibilidade base do detector de voz |

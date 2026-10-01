@@ -113,6 +113,26 @@
   appearance, and the seven-day dogfood check remain pending. Automated tests cannot
   confirm those desktop and real-device results.
 
+## Ollama model-selection and VRAM follow-up — 2026-10-01
+
+- Startup still loads Whisper and the local voice, but no longer preloads the configured
+  LLM. The installed-model list and the last selected preference are resolved before an
+  explicit **Load selected model** action can warm an LLM.
+- File → Model distinguishes the selection, Dogen's model for the next turn, the model
+  used for the last response, and the global resident-model/VRAM snapshot from Ollama.
+  Ollama does not report which client owns resident models.
+- Switching explicitly releases Dogen's previously activated model before warming the
+  newly selected one. Conversation requests retain models for five minutes after use,
+  instead of indefinitely. Other resident models are not unloaded silently; a separate
+  confirmed action warns that unloading them affects every app using the shared Ollama
+  server.
+- Automated coverage includes the startup wait-for-choice state, unload-before-load
+  ordering, finite retention, shared VRAM reporting, explicit cross-app unload warning,
+  and exact model attribution in Dogen's selection/turn records.
+- Manual acceptance is still required to confirm VRAM release and compare stronger models
+  on the user's RX 7600 8 GB. A model left resident by an earlier app version can be seen
+  in the menu; freeing it requires the confirmed action or restarting the Ollama service.
+
 ## Environment
 
 - Operating system: Windows
@@ -120,15 +140,15 @@
 - Compute path: CPU PyTorch
 - Microphone: not identified from the supplied recording
 - Whisper default: `small.en`
-- Startup: speech recognition, voice, and Ollama model load automatically
+- Startup: Whisper/voice load automatically; Ollama LLM requires explicit selection/load
 - Input: click once to start recording and once to finish
 - Noise reduction default: enabled
 - TTS default: `tts_models/en/ljspeech/tacotron2-DDC`
-- LLM default: local Ollama `mistral`
+- Initial LLM preference: local Ollama `mistral`; no model is loaded until selected
 
 ## Automated verification
 
-Executed from the isolated Dogen worktree:
+Executed in the Dogen checkout on 2026-10-01:
 
 ```powershell
 .venv\Scripts\python.exe -m pytest -q -p no:cacheprovider
@@ -137,12 +157,12 @@ Executed from the isolated Dogen worktree:
 
 Result:
 
-- 91 tests passed in 9.12 seconds;
+- 263 tests passed in 33.34 seconds;
 - no broken Python requirements;
-- all 35 Python source files compiled in memory without syntax errors;
-- `git diff --check` reported no whitespace errors.
+- `ui`, `nlp`, and `tests` compile without syntax errors;
+- `git diff --check` reported no whitespace errors (only Git line-ending notices).
 
-The pytest cache plugin is disabled only in the managed worktree because its sandbox cannot create `.pytest_cache`. It does not change which tests run.
+The pytest cache plugin is disabled in this checkout to avoid creating `.pytest_cache`. It does not change which tests run.
 
 ## Field evidence
 

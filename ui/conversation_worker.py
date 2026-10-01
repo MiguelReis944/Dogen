@@ -24,12 +24,17 @@ class ConversationWorker(QThread):
     response_chunk    = pyqtSignal(str)
     audio_playing     = pyqtSignal()
     error             = pyqtSignal(str)
+    speech_ready      = pyqtSignal()
+    model_loaded      = pyqtSignal(str)
+    model_unloaded    = pyqtSignal(str)
+    model_load_failed = pyqtSignal(str, str)
     ready             = pyqtSignal()
     turn_completed    = pyqtSignal(object, int)
     volume_level      = pyqtSignal(float)
     speech_level      = pyqtSignal(float)   # TTS playback amplitude, drives the pet's mouth
 
-    def __init__(self, config, context, model, pipeline=None, parent=None):
+    def __init__(self, config, context, model, pipeline=None, parent=None,
+                 active_model=None):
         super().__init__(parent)
         self.config = config
         self.context = context
@@ -42,6 +47,10 @@ class ConversationWorker(QThread):
         self._playback_active = False
         self._confirm_event   = threading.Event()
         self._confirmed_text  = ""
+        self._active_model = active_model
+        self._model_request_lock = threading.Lock()
+        self._model_request_event = threading.Event()
+        self._requested_model = None
 
     # ── cancellation ───────────────────────────────────────────────────────────
 
@@ -55,6 +64,22 @@ class ConversationWorker(QThread):
 
     def end_ptt(self):
         self._ptt_stop_event.set()
+
+    def request_model_load(self, model: str, unload_models=()):
+        if not model:
+            return
+        with self._model_request_lock:
+            self._requested_model = (model, tuple(unload_models))
+            self._model_request_event.set()
+
+    def _take_model_request(self, timeout=0.1):
+        if not self._model_request_event.wait(timeout):
+            return None
+        with self._model_request_lock:
+            model = self._requested_model
+            self._requested_model = None
+            self._model_request_event.clear()
+            return model
 
     def _prepare_ptt_wait(self):
         self._ptt_start_event.clear()
@@ -117,19 +142,70 @@ class ConversationWorker(QThread):
                     self.msleep(100)
         if self._cancelled():
             return False
-        self.status_message.emit(f"Loading {pipeline.llm.model} into RAM...")
+        model = pipeline.llm.model
+        self.status_message.emit(f"Loading {model} into Ollama...")
         try:
             pipeline.llm.client.generate(
-                model=pipeline.llm.model, prompt="", options={"num_predict": 0},
-                keep_alive=-1,
+                model=model, prompt="", options={"num_predict": 0},
+                keep_alive="5m",
             )
         except Exception as exc:
             log_diagnostic(
                 "turn_failed", stage="model", error_type=type(exc).__name__
             )
-            self.error.emit(f"Could not load {pipeline.llm.model}: {exc}")
+            self.model_load_failed.emit(model, f"Could not load {model}: {exc}")
             return False
         return True
+
+    def _load_model(self, pipeline, model: str) -> bool:
+        if self._active_model == model:
+            pipeline.llm.model = model
+            if not self._warm_up_llm(pipeline):
+                return False
+            self.model_loaded.emit(model)
+            return True
+
+        previous = self._active_model
+        if previous:
+            if not self._release_model(pipeline, previous, model):
+                return False
+
+        pipeline.llm.model = model
+        if not self._warm_up_llm(pipeline):
+            return False
+        self._active_model = model
+        self.model = model
+        self.model_loaded.emit(model)
+        return True
+
+    def _release_model(self, pipeline, name: str, requested_model: str) -> bool:
+        self.status_message.emit(f"Releasing {name} from Ollama...")
+        try:
+            pipeline.llm.client.generate(
+                model=name, prompt="", options={"num_predict": 0},
+                keep_alive=0,
+            )
+        except Exception as exc:
+            log_diagnostic(
+                "turn_failed", stage="model", error_type=type(exc).__name__
+            )
+            self.model_load_failed.emit(
+                requested_model, f"Could not release {name} before loading {requested_model}: {exc}"
+            )
+            return False
+        if self._active_model == name:
+            self._active_model = None
+            self.model_unloaded.emit(name)
+        return True
+
+    def _handle_model_request(self, pipeline, request) -> bool:
+        model, unload_models = request
+        for resident in unload_models:
+            if resident == model:
+                continue
+            if not self._release_model(pipeline, resident, model):
+                return False
+        return self._load_model(pipeline, model)
 
     # ── main loop ──────────────────────────────────────────────────────────────
 
@@ -137,7 +213,6 @@ class ConversationWorker(QThread):
         try:
             if self._prebuilt_pipeline:
                 pipeline = self._prebuilt_pipeline
-                pipeline.llm.model = self.model
             else:
                 self.status_message.emit("Loading speech recognition…")
                 try:
@@ -185,20 +260,33 @@ class ConversationWorker(QThread):
                 self.error.emit(str(exc))
                 return
 
-            # Warmup: wait for Ollama and pre-load the model into RAM.
-            if not self._warm_up_llm(pipeline):
-                return
-
+            self.speech_ready.emit()
+            self.status_message.emit("Choose a model in File → Model, then load it to start.")
             is_ptt = self.config.input_mode == "ptt"
 
             while not self._cancelled():
+                if not self._active_model:
+                    request = self._take_model_request()
+                    if request:
+                        self._handle_model_request(pipeline, request)
+                    continue
+
                 # PTT mode: wait for the key press before starting the recorder
                 if is_ptt:
                     self._prepare_ptt_wait()
-                    while not self._cancelled() and not self._ptt_start_event.wait(timeout=0.1):
-                        pass
+                    model_changed = False
+                    while not self._cancelled():
+                        request = self._take_model_request()
+                        if request:
+                            self._handle_model_request(pipeline, request)
+                            model_changed = True
+                            break
+                        if self._ptt_start_event.is_set():
+                            break
                     if self._cancelled():
                         return
+                    if model_changed:
+                        continue
 
                 self.recording_started.emit()
                 try:

@@ -38,7 +38,7 @@ _VOL_SCALE = 600
 
 class ModelFetcher(QThread):
     """Queries Ollama for available models without blocking the UI."""
-    models_ready = pyqtSignal(list)
+    models_ready = pyqtSignal(object, object, str)
 
     def __init__(self, host, parent=None):
         super().__init__(parent)
@@ -47,14 +47,41 @@ class ModelFetcher(QThread):
     def run(self):
         try:
             import ollama
-            response = ollama.Client(host=self.host).list()
-            models = response.models if hasattr(response, "models") else response.get("models", [])
+            client = ollama.Client(host=self.host)
+            response = client.list()
+            models = (
+                response.models if hasattr(response, "models")
+                else response.get("models", [])
+            )
             names = sorted(
                 (m.model if hasattr(m, "model") else m.get("model", "")) for m in models
             )
-            self.models_ready.emit([n for n in names if n])
-        except Exception:
-            self.models_ready.emit([])
+        except Exception as exc:
+            self.models_ready.emit([], [], f"Could not connect to Ollama: {exc}")
+            return
+
+        try:
+            response = client.ps()
+            models = (
+                response.models if hasattr(response, "models")
+                else response.get("models", [])
+            )
+            resident = []
+            for model in models:
+                if isinstance(model, dict):
+                    name = model.get("name") or model.get("model") or ""
+                    size_vram = model.get("size_vram", 0)
+                else:
+                    name = getattr(model, "name", None) or getattr(model, "model", "")
+                    size_vram = getattr(model, "size_vram", 0)
+                if name:
+                    resident.append({"name": name, "size_vram": int(size_vram or 0)})
+            self.models_ready.emit([n for n in names if n], resident, "")
+        except Exception as exc:
+            self.models_ready.emit(
+                [n for n in names if n], [],
+                f"Could not read Ollama's resident-model status: {exc}",
+            )
 
 
 class ReplayWorker(QThread):
@@ -117,15 +144,24 @@ class MainWindow(QMainWindow):
         self._restart_after_settings = False
         self._fluency_mode = False
         self._capture_state = CaptureState.READY
-        self._record_when_ready = False
+        self._configuration_locked = False
+        self._model_names = []
+        self._current_model = config.ollama_model or ""
+        self._loaded_model = None
+        self._last_turn_model = None
+        self._resident_models = []
+        self._model_fetch_error = ""
+        self._models_ready = False
+        self._speech_ready = False
+        self._model_load_pending = False
+        self._worker_waiting_for_ptt = False
+        self._model_request_on_start = None
         self.status_group = None
 
         # The focused conversation experience has one supported input and voice.
         self.config.input_mode = "ptt"
         self.config.tts_model = FEMALE_VOICE_MODEL
 
-        self._model_names = [config.ollama_model or "mistral"]
-        self._current_model = self._model_names[0]
         self._selected_scenario = next(iter(SCENARIOS))
 
         self._build_menu()
@@ -315,7 +351,7 @@ class MainWindow(QMainWindow):
         self.loading_menu_action.setEnabled(False)
         self.loading_menu_action.setVisible(False)
         self.loading_menu_action.setToolTip(
-            "Model-dependent options will unlock when startup is complete."
+            "Speech components load automatically. Choose and load an Ollama model separately."
         )
         file_menu.addAction(self.loading_menu_action)
 
@@ -362,6 +398,7 @@ class MainWindow(QMainWindow):
 
         self.model_menu = file_menu.addMenu("Model")
         self._rebuild_model_menu()
+        self.model_menu.aboutToShow.connect(self._fetch_models)
 
         file_menu.addSeparator()
 
@@ -401,57 +438,281 @@ class MainWindow(QMainWindow):
             self.worker.end_ptt()
             self.record_button.setEnabled(False)
             self.record_button.setText("Finishing…")
+        elif (
+            self._speech_ready and self._current_model
+            and self._loaded_model != self._current_model
+        ):
+            self._load_selected_model()
         elif self._capture_state == "ready" and self.worker and self.worker.isRunning():
             self.worker.begin_ptt()
             self.record_button.setEnabled(False)
             self.record_button.setText("Starting…")
         elif not (self.worker and self.worker.isRunning()):
-            self._record_when_ready = True
-            self.start()
+            self._load_selected_model()
 
     # ── models ─────────────────────────────────────────────────────────────────
 
     def _fetch_models(self):
+        if hasattr(self, "_fetcher") and self._fetcher.isRunning():
+            return
         self._fetcher = ModelFetcher(self.config.ollama_host, self)
         self._fetcher.models_ready.connect(self._on_models_ready)
         self._fetcher.start()
 
     def _restore_model_preference(self):
         saved = self.db.get_setting("last_model")
-        if saved in self._model_names:
-            self._current_model = saved
-            self._rebuild_model_menu()
+        preferred = saved or self.config.ollama_model
+        resolved = self._match_model_name(preferred)
+        self._current_model = resolved or (
+            self._model_names[0] if self._model_names else ""
+        )
 
-    def _on_models_ready(self, names):
-        self._model_names = names or [self._current_model]
-        if self._current_model not in self._model_names:
-            self._current_model = self._model_names[0]
+    def _match_model_name(self, preferred):
+        if preferred in self._model_names:
+            return preferred
+        if preferred and ":" not in preferred:
+            return next(
+                (name for name in self._model_names if name.split(":", 1)[0] == preferred),
+                None,
+            )
+        return None
+
+    def _on_models_ready(self, names, resident_models=(), error=""):
+        self._models_ready = True
+        self._model_names = list(names or [])
+        self._resident_models = list(resident_models or [])
+        self._model_fetch_error = error or ""
         self._restore_model_preference()
         self._rebuild_model_menu()
-        pipeline = self._pipeline or (self.worker.built_pipeline if self.worker else None)
-        if pipeline is not None:
-            pipeline.llm.model = self._current_model
+        self._update_model_controls()
+        if not self._model_names:
+            self._set_status(error or "No Ollama models are installed. Install a model, then refresh this list.")
 
     def _rebuild_model_menu(self):
         if not hasattr(self, "model_menu"):
             return
         self.model_menu.clear()
+        self.model_selected_status = self.model_menu.addAction("")
+        self.model_selected_status.setEnabled(False)
+        self.model_runtime_status = self.model_menu.addAction("")
+        self.model_runtime_status.setEnabled(False)
+        self.model_last_turn_status = self.model_menu.addAction("")
+        self.model_last_turn_status.setEnabled(False)
+        self.model_resident_status = self.model_menu.addAction("")
+        self.model_resident_status.setEnabled(False)
+        self.model_menu.addSeparator()
+
+        if not self._model_names:
+            empty = self.model_menu.addAction(
+                "Loading installed models…" if not self._models_ready
+                else "No Ollama models found"
+            )
+            empty.setEnabled(False)
         for name in self._model_names:
             action = self.model_menu.addAction(name)
             action.setCheckable(True)
             action.setChecked(name == self._current_model)
             action.triggered.connect(lambda checked, value=name: self._select_model(value))
+        self.model_menu.addSeparator()
+        self.load_model_action = self.model_menu.addAction("Load selected model")
+        self.load_model_action.setToolTip(
+            "Loads only after you choose it. Switching releases the previous Dogen model "
+            "from the shared Ollama service; another app using that same model may reload it."
+        )
+        self.load_model_action.triggered.connect(self._load_selected_model_action)
+        self.unload_other_models_action = self.model_menu.addAction(
+            "Unload other models and load selected…"
+        )
+        self.unload_other_models_action.triggered.connect(self._confirm_unload_other_models)
+        self.refresh_models_action = self.model_menu.addAction("Refresh model list")
+        self.refresh_models_action.triggered.connect(self._fetch_models)
+        self._update_model_menu_status()
+        self._update_model_controls()
+
+    def _update_model_menu_status(self):
+        if not hasattr(self, "model_selected_status"):
+            return
+        selected = self._current_model or "none"
+        self.model_selected_status.setText(f"Selected: {selected}")
+        self.model_runtime_status.setText(
+            f"Dogen will use: {self._loaded_model or 'not loaded'}"
+        )
+        self.model_runtime_status.setToolTip(
+            "The model assigned to Dogen for its next response. Ollama may release it "
+            "after five minutes without a request."
+        )
+        self.model_last_turn_status.setText(
+            f"Last response used: {self._last_turn_model or 'none this session'}"
+        )
+        total_vram = sum(
+            max(0, int(model.get("size_vram", 0) or 0))
+            for model in self._resident_models
+        )
+        if self._model_fetch_error and self._models_ready:
+            memory_text = "Ollama memory: status unavailable"
+            memory_tooltip = self._model_fetch_error
+        elif self._models_ready:
+            memory_text = f"Ollama VRAM: {total_vram / 1_000_000_000:.1f} GB shared"
+            resident_names = ", ".join(
+                model.get("name", "") for model in self._resident_models
+            ) or "none"
+            memory_tooltip = (
+                f"Resident models: {resident_names}. This is shared Ollama GPU usage, "
+                "not a per-application measurement."
+            )
+        else:
+            memory_text = "Ollama VRAM: checking…"
+            memory_tooltip = "Checking which models are currently resident in Ollama."
+        self.model_resident_status.setText(memory_text)
+        self.model_resident_status.setToolTip(memory_tooltip)
+
+    def _update_model_controls(self):
+        if not hasattr(self, "model_menu"):
+            return
+        selecting_allowed = (
+            self._models_ready
+            and not self._model_load_pending
+            and (
+                not self._configuration_locked
+                or (self._capture_state is CaptureState.LOADING and self._loaded_model is None)
+            )
+        )
+        self.model_menu.setEnabled(selecting_allowed)
+        if hasattr(self, "load_model_action"):
+            self.load_model_action.setEnabled(
+                self._speech_ready and bool(self._current_model)
+                and self._current_model in self._model_names
+                and not self._model_load_pending
+                and not self._configuration_locked
+            )
+            other_resident = any(
+                model.get("name") != self._current_model
+                for model in self._resident_models
+            )
+            self.unload_other_models_action.setEnabled(
+                self._speech_ready and bool(self._current_model) and other_resident
+                and not self._model_load_pending and not self._configuration_locked
+            )
+        if not hasattr(self, "record_button"):
+            return
+        if self._model_load_pending:
+            self.record_button.setText("Loading model…")
+            self.record_button.setEnabled(False)
+        elif self._last_error:
+            self.record_button.setText("Unavailable")
+            self.record_button.setEnabled(False)
+        elif not self._speech_ready:
+            self.record_button.setText("Loading speech models…")
+            self.record_button.setEnabled(False)
+        elif not self._models_ready or not self._current_model:
+            self.record_button.setText("Ollama model unavailable")
+            self.record_button.setEnabled(False)
+        elif self._loaded_model != self._current_model:
+            self.record_button.setText("Load selected model")
+            self.record_button.setEnabled(not self._configuration_locked)
+        elif (
+            self._capture_state == CaptureState.READY
+            and self.worker and self.worker.isRunning()
+            and self._worker_waiting_for_ptt
+        ):
+            self.record_button.setText("Start recording")
+            self.record_button.setEnabled(not self._configuration_locked)
+        elif self._capture_state == CaptureState.READY and not (
+            self.worker and self.worker.isRunning()
+        ):
+            self.record_button.setText("Start recording")
+            self.record_button.setEnabled(not self._configuration_locked)
+        elif self._capture_state == CaptureState.READY:
+            self.record_button.setText("Preparing microphone…")
+            self.record_button.setEnabled(False)
+        self._update_model_menu_status()
 
     def _select_model(self, name: str):
         if name in self._model_names:
             self._current_model = name
-            pipeline = self._pipeline or (
-                self.worker.built_pipeline if self.worker else None
-            )
-            if pipeline is not None:
-                pipeline.llm.model = name
             self._on_model_changed(name)
             self._rebuild_model_menu()
+
+    def _load_selected_model_action(self, checked=False):
+        self._load_selected_model()
+
+    def _load_selected_model(self, unload_models=()):
+        if (
+            not self._current_model
+            or self._current_model not in self._model_names
+            or not self._speech_ready
+            or self._model_load_pending
+        ):
+            return
+        self._model_load_pending = True
+        self._configuration_locked = True
+        self.loading_menu_action.setText(f"Loading {self._current_model}…")
+        self.loading_menu_action.setVisible(True)
+        self._set_capture_state(CaptureState.LOADING, f"Loading {self._current_model} into Ollama…")
+        self._update_model_controls()
+        if self.worker and self.worker.isRunning():
+            self.worker.request_model_load(self._current_model, unload_models)
+        else:
+            self._model_request_on_start = (self._current_model, tuple(unload_models))
+            self.start()
+
+    def _confirm_unload_other_models(self, checked=False):
+        others = [
+            model for model in self._resident_models
+            if model.get("name") and model.get("name") != self._current_model
+        ]
+        if not others:
+            self._fetch_models()
+            self._set_status("No other Ollama models are currently listed as resident.")
+            return
+        details = "\n".join(
+            f"• {model['name']} ({int(model.get('size_vram', 0) or 0) / 1_000_000_000:.1f} GB VRAM)"
+            for model in others
+        )
+        answer = QMessageBox.question(
+            self,
+            "Free Ollama VRAM",
+            "Ollama is shared by all apps on this computer. Unloading these models may "
+            "interrupt another app using them:\n\n"
+            f"{details}\n\nUnload them, then load {self._current_model}?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if answer == QMessageBox.Yes:
+            self._load_selected_model(unload_models=[model["name"] for model in others])
+
+    def _on_speech_ready(self):
+        self._speech_ready = True
+        self._configuration_locked = False
+        self.loading_menu_action.setVisible(False)
+        self._set_configuration_enabled(True)
+        if self._model_names:
+            message = "Choose a model in File → Model, then load it to start."
+        else:
+            message = self._model_fetch_error or "Waiting for an installed Ollama model."
+        self._set_capture_state(CaptureState.READY, message)
+        self._update_model_controls()
+
+    def _on_model_loaded(self, name):
+        self._loaded_model = name
+        self._model_request_on_start = None
+        self._update_model_menu_status()
+        QTimer.singleShot(500, self._fetch_models)
+
+    def _on_model_unloaded(self, name):
+        if self._loaded_model == name:
+            self._loaded_model = None
+        self._update_model_menu_status()
+
+    def _on_model_load_failed(self, name, message):
+        self._model_load_pending = False
+        self._model_request_on_start = None
+        self.loading_menu_action.setVisible(False)
+        self._configuration_locked = False
+        self._set_configuration_enabled(True)
+        self._set_capture_state(CaptureState.READY, message)
+        self._update_model_controls()
+        QTimer.singleShot(500, self._fetch_models)
 
     def _select_scenario(self, name: str):
         if name in SCENARIOS:
@@ -566,11 +827,12 @@ class MainWindow(QMainWindow):
     # ── start / stop ───────────────────────────────────────────────────────────
 
     def _set_configuration_enabled(self, enabled: bool):
+        self._configuration_locked = not enabled
         self.new_session_action.setEnabled(enabled)
-        self.model_menu.setEnabled(enabled)
         self.scenario_menu.setEnabled(enabled)
         self.flow_action.setEnabled(enabled)
         self.settings_action.setEnabled(enabled)
+        self._update_model_controls()
 
     def _set_status(self, text: str):
         state = self._capture_state
@@ -606,11 +868,15 @@ class MainWindow(QMainWindow):
     def start(self):
         if self.worker and self.worker.isRunning():
             return
+        self._speech_ready = False
+        self._worker_waiting_for_ptt = False
         self._set_configuration_enabled(False)
         self.loading_menu_action.setVisible(True)
         self.replay_response_button.setEnabled(False)
         self.worker = ConversationWorker(
-            self.config, self.context, self._selected_model(), self._pipeline, self
+            self.config, self.context,
+            self._selected_model() or self.config.ollama_model or "mistral",
+            self._pipeline, self, active_model=self._loaded_model,
         )
         self.worker.status_message.connect(self._set_status)
         self.worker.recording_started.connect(self._on_recording_started)
@@ -621,6 +887,10 @@ class MainWindow(QMainWindow):
         self.worker.response_chunk.connect(self._on_chunk)
         self.worker.audio_playing.connect(self._on_audio_playing)
         self.worker.error.connect(self._on_error)
+        self.worker.speech_ready.connect(self._on_speech_ready)
+        self.worker.model_loaded.connect(self._on_model_loaded)
+        self.worker.model_unloaded.connect(self._on_model_unloaded)
+        self.worker.model_load_failed.connect(self._on_model_load_failed)
         self.worker.ready.connect(self._on_ready)
         self.worker.turn_completed.connect(self._on_completed)
         self.worker.finished.connect(self._on_finished)
@@ -630,7 +900,14 @@ class MainWindow(QMainWindow):
         self.record_button.setEnabled(False)
         self.record_button.setText("Loading…")
         self._last_error = None
-        self._set_status("Starting...")
+        self._set_capture_state(CaptureState.LOADING, "Loading speech models…")
+        self._update_model_controls()
+        self.record_button.setText("Loading speech models…")
+        self.record_button.setEnabled(False)
+        self._set_status("Loading speech models…")
+        if self._model_request_on_start:
+            model, unload_models = self._model_request_on_start
+            self.worker.request_model_load(model, unload_models)
         self.worker.start()
 
     def stop(self):
@@ -644,6 +921,7 @@ class MainWindow(QMainWindow):
     # ── worker signal handlers ─────────────────────────────────────────────────
 
     def _on_recording_started(self):
+        self._worker_waiting_for_ptt = False
         self._set_configuration_enabled(False)
         self.loading_menu_action.setVisible(False)
         self._last_error = None
@@ -677,6 +955,8 @@ class MainWindow(QMainWindow):
 
     def _on_waiting_for_ptt(self):
         self.loading_menu_action.setVisible(False)
+        self._model_load_pending = False
+        self._worker_waiting_for_ptt = True
         self._set_configuration_enabled(True)
         self._set_capture_state("ready")
         self.pet.set_state("idle")
@@ -686,13 +966,10 @@ class MainWindow(QMainWindow):
         self.record_button.setText("Start recording")
         self.record_button.setEnabled(True)
         self._set_capture_state(
-            "ready", self._response_notice or "Ready — click Start recording to speak"
+            "ready", self._response_notice or
+            f"Ready — {self._loaded_model}; click Start recording to speak"
         )
-        if self._record_when_ready and self.worker and self.worker.isRunning():
-            self._record_when_ready = False
-            self.worker.begin_ptt()
-            self.record_button.setEnabled(False)
-            self.record_button.setText("Starting…")
+        self._update_model_controls()
 
     def _on_volume(self, rms: float):
         self._render_volume(rms)
@@ -795,12 +1072,15 @@ class MainWindow(QMainWindow):
                 trace_id=trace_id,
             )
         try:
+            model_used = self._loaded_model or "unknown"
+            self._last_turn_model = model_used
+            self._update_model_menu_status()
             if result.is_complete:
                 self.db.add_completed_turn(
                     self.session_id,
                     result.transcript,
                     result.reply,
-                    self._selected_model(),
+                    model_used,
                     latency_ms,
                     result.feedback,
                     result.metrics,
@@ -815,7 +1095,7 @@ class MainWindow(QMainWindow):
                     self.session_id,
                     result.transcript,
                     result.reply,
-                    self._selected_model(),
+                    model_used,
                     latency_ms,
                     result.feedback,
                 )
@@ -847,6 +1127,7 @@ class MainWindow(QMainWindow):
         self._set_capture_state("error" if self._last_error else "ready")
         self.pet.set_state("idle")
         if self._last_error is None:
+            self._speech_ready = bool(self.worker and self.worker.built_pipeline)
             self.record_button.setEnabled(True)
             self.record_button.setText("Start recording")
         else:
@@ -856,7 +1137,13 @@ class MainWindow(QMainWindow):
         self.stop_audio_button.setEnabled(False)
         self.replay_response_button.setEnabled(bool(self._last_assistant_text and self._pipeline))
         if self._last_error is None:
-            self._set_status(self._response_notice or self._idle_instruction())
+            self._set_status(
+                self._response_notice or (
+                    f"Ready — {self._loaded_model}; click Start recording to speak"
+                    if self._loaded_model else "Choose a model in File → Model, then load it to start."
+                )
+            )
+            self._update_model_controls()
         if self._closing:
             self._restart_after_settings = False
             self.close()

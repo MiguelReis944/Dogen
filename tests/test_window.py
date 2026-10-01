@@ -7,7 +7,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QTextCursor
-from PyQt5.QtWidgets import QApplication, QPushButton
+from PyQt5.QtWidgets import QApplication, QMessageBox, QPushButton
 
 from nlp.llm import ConversationContext
 from nlp.feedback import CoachFeedback
@@ -15,7 +15,7 @@ from pipeline import TurnResult
 from storage.db import Database
 from storage.models import TurnMetrics
 from storage.progress import ProgressService, ProgressStats
-from ui.main_window import ConversationWorker, MainWindow
+from ui.main_window import ConversationWorker, MainWindow, ModelFetcher
 from ui.session_summary_dialog import SessionSummaryDialog
 from ui.progress_dialog import ProgressDialog
 from ui.settings_dialog import SettingsDialog
@@ -85,11 +85,11 @@ def test_ollama_warmup_failure_keeps_worker_unavailable():
         llm=SimpleNamespace(client=BrokenWarmupClient(), model="missing")
     )
     worker = ConversationWorker(AppConfig(), ConversationContext(), "missing")
-    errors = []
-    worker.error.connect(errors.append)
+    failures = []
+    worker.model_load_failed.connect(lambda model, message: failures.append((model, message)))
 
     assert not worker._warm_up_llm(pipeline)
-    assert errors == ["Could not load missing: model is missing"]
+    assert failures == [("missing", "Could not load missing: model is missing")]
 
 
 def test_ollama_warmup_requests_resident_model():
@@ -99,7 +99,150 @@ def test_ollama_warmup_requests_resident_model():
     worker = ConversationWorker(AppConfig(), ConversationContext(), "mistral")
 
     assert worker._warm_up_llm(pipeline)
-    assert client.generate.call_args.kwargs["keep_alive"] == -1
+    assert client.generate.call_args.kwargs["keep_alive"] == "5m"
+
+
+def test_worker_does_not_load_default_model_before_user_selection(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    client = MagicMock()
+    pipeline = SimpleNamespace(llm=SimpleNamespace(client=client, model="mistral"))
+    worker = ConversationWorker(AppConfig(), ConversationContext(), "mistral", pipeline)
+    speech_ready = __import__("threading").Event()
+    worker.speech_ready.connect(speech_ready.set, Qt.DirectConnection)
+    monkeypatch.setattr("ui.conversation_worker.Recorder", lambda *args: object())
+
+    worker.start()
+    assert speech_ready.wait(2)
+    try:
+        assert client.generate.call_count == 0
+    finally:
+        worker.requestInterruption()
+        worker.wait(2000)
+
+
+def test_switching_model_unloads_previous_before_warming_selected_model():
+    app = QApplication.instance() or QApplication([])
+    calls = []
+
+    class Ollama:
+        def list(self):
+            return []
+
+        def generate(self, **kwargs):
+            calls.append(kwargs)
+
+    pipeline = SimpleNamespace(llm=SimpleNamespace(client=Ollama(), model="mistral"))
+    worker = ConversationWorker(AppConfig(), ConversationContext(), "mistral")
+    worker._active_model = "mistral"
+
+    assert worker._load_model(pipeline, "llama3.2:3b")
+
+    assert [call["model"] for call in calls] == ["mistral", "llama3.2:3b"]
+    assert calls[0]["keep_alive"] == 0
+    assert calls[1]["keep_alive"] == "5m"
+    assert pipeline.llm.model == "llama3.2:3b"
+
+
+def test_explicitly_loading_active_model_warms_it_again():
+    app = QApplication.instance() or QApplication([])
+    calls = []
+
+    class Ollama:
+        def list(self):
+            return []
+
+        def generate(self, **kwargs):
+            calls.append(kwargs)
+
+    pipeline = SimpleNamespace(llm=SimpleNamespace(client=Ollama(), model="mistral"))
+    worker = ConversationWorker(AppConfig(), ConversationContext(), "mistral")
+    worker._active_model = "mistral"
+
+    assert worker._load_model(pipeline, "mistral")
+
+    assert len(calls) == 1
+    assert calls[0]["model"] == "mistral"
+    assert calls[0]["keep_alive"] == "5m"
+
+
+def test_model_fetcher_includes_global_resident_vram(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+
+    class Ollama:
+        def list(self):
+            return SimpleNamespace(models=[SimpleNamespace(model="llama3.2:3b")])
+
+        def ps(self):
+            return SimpleNamespace(models=[
+                SimpleNamespace(name="llama3.2:3b", size_vram=2_600_000_000)
+            ])
+
+    monkeypatch.setattr("ollama.Client", lambda **kwargs: Ollama())
+    fetcher = ModelFetcher("http://localhost:11434")
+    results = []
+    fetcher.models_ready.connect(lambda names, resident, error: results.append((names, resident, error)))
+
+    fetcher.run()
+
+    assert results == [(
+        ["llama3.2:3b"], [{"name": "llama3.2:3b", "size_vram": 2_600_000_000}], ""
+    )]
+
+
+def test_worker_unloads_other_resident_models_only_when_the_request_names_them():
+    app = QApplication.instance() or QApplication([])
+    calls = []
+
+    class Ollama:
+        def list(self):
+            return []
+
+        def generate(self, **kwargs):
+            calls.append(kwargs)
+
+    pipeline = SimpleNamespace(llm=SimpleNamespace(client=Ollama(), model="mistral"))
+    worker = ConversationWorker(AppConfig(), ConversationContext(), "mistral")
+
+    assert worker._handle_model_request(pipeline, ("llama3.2:3b", ["mistral:latest"]))
+
+    assert [call["model"] for call in calls] == ["mistral:latest", "llama3.2:3b"]
+    assert calls[0]["keep_alive"] == 0
+    assert calls[1]["keep_alive"] == "5m"
+
+
+def test_explicit_global_unload_action_warns_and_passes_models_to_worker(tmp_path):
+    app = QApplication.instance() or QApplication([])
+
+    class WaitingWorker:
+        def __init__(self):
+            self.requests = []
+
+        def isRunning(self):
+            return True
+
+        def request_model_load(self, model, unload_models=()):
+            self.requests.append((model, tuple(unload_models)))
+
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        window._on_models_ready(
+            ["mistral:latest", "llama3.2:3b"],
+            [
+                {"name": "mistral:latest", "size_vram": 5_000_000_000},
+                {"name": "llama3.2:3b", "size_vram": 2_600_000_000},
+            ],
+        )
+        window._speech_ready = True
+        worker = WaitingWorker()
+        window.worker = worker
+
+        with patch("ui.main_window.QMessageBox.question", return_value=QMessageBox.Yes) as confirm:
+            window._confirm_unload_other_models()
+
+        assert worker.requests == [("mistral:latest", ("llama3.2:3b",))]
+        assert "shared by all apps" in confirm.call_args.args[2]
+        assert window._model_load_pending is True
+        window.close()
 
 
 def test_window_keeps_dogen_name_and_single_record_control(tmp_path):
@@ -174,6 +317,9 @@ def test_record_button_clicks_start_and_finish_capture(tmp_path):
 
     with Database(tmp_path / "conversation.db") as db:
         window = _make_window(db)
+        window._on_models_ready(["mistral"])
+        window._speech_ready = True
+        window._loaded_model = "mistral"
         worker = RunningWorker()
         window.worker = worker
         window._on_waiting_for_ptt()
@@ -256,6 +402,7 @@ def test_configuration_actions_are_available_only_while_worker_waits_for_recordi
     app = QApplication.instance() or QApplication([])
     with Database(tmp_path / "conversation.db") as db:
         window = _make_window(db)
+        window._on_models_ready(["mistral", "llama3"])
 
         with patch.object(ConversationWorker, "start", return_value=None):
             window.start()
@@ -263,12 +410,12 @@ def test_configuration_actions_are_available_only_while_worker_waits_for_recordi
         assert window.loading_menu_action.isVisible()
         assert window.loading_menu_action.text() == "Loading local models…"
         assert not window.flow_action.isEnabled()
-        assert not window.model_menu.isEnabled()
+        assert window.model_menu.isEnabled()
         assert not window.scenario_menu.isEnabled()
         assert not window.settings_action.isEnabled()
         assert not window.new_session_action.isEnabled()
 
-        window._on_waiting_for_ptt()
+        window._on_speech_ready()
         assert not window.loading_menu_action.isVisible()
         assert window.flow_action.isEnabled()
         assert window.model_menu.isEnabled()
@@ -342,18 +489,80 @@ def test_new_session_resets_context_while_worker_is_waiting(tmp_path):
         window.close()
 
 
-def test_model_selection_updates_loaded_pipeline_for_next_turn(tmp_path):
+def test_selecting_model_does_not_relabel_loaded_pipeline_until_explicit_load(tmp_path):
     app = QApplication.instance() or QApplication([])
     with Database(tmp_path / "conversation.db") as db:
         window = _make_window(db)
         pipeline = SimpleNamespace(llm=SimpleNamespace(model="mistral"))
         window._pipeline = pipeline
+        window._loaded_model = "mistral"
         window._on_models_ready(["mistral", "llama3"])
 
         window._select_model("llama3")
 
-        assert pipeline.llm.model == "llama3"
+        assert pipeline.llm.model == "mistral"
+        assert window._loaded_model == "mistral"
+        assert window._selected_model() == "llama3"
         assert db.get_setting("last_model") == "llama3"
+        window.close()
+
+
+def test_record_button_requests_selected_model_before_starting_capture(tmp_path):
+    app = QApplication.instance() or QApplication([])
+
+    class WaitingWorker:
+        def __init__(self):
+            self.requests = []
+            self.started = 0
+
+        def isRunning(self):
+            return True
+
+        def request_model_load(self, name, unload_models=()):
+            self.requests.append((name, tuple(unload_models)))
+
+        def begin_ptt(self):
+            self.started += 1
+
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        window._on_models_ready(["mistral", "llama3"])
+        window._speech_ready = True
+        worker = WaitingWorker()
+        window.worker = worker
+        window._update_model_controls()
+
+        window.record_button.click()
+
+        assert worker.requests == [("mistral", ())]
+        assert worker.started == 0
+        assert window.record_button.text() == "Loading model…"
+        window.close()
+
+
+def test_completed_turn_records_model_actually_assigned_to_dogen(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        window._current_model = "qwen2.5:14b"
+        window._loaded_model = "llama3.2:3b"
+        window.db.add_completed_turn = MagicMock()
+        window._render_history = MagicMock()
+        window._update_stats = MagicMock()
+        result = SimpleNamespace(
+            is_complete=True,
+            trace_id=None,
+            transcript="Hello there",
+            reply="Hi!",
+            feedback=CoachFeedback(),
+            metrics=TurnMetrics(2, 0, False, None),
+            audio_error=None,
+        )
+
+        window._on_completed(result, 100)
+
+        assert window.db.add_completed_turn.call_args.args[3] == "llama3.2:3b"
+        assert window.model_last_turn_status.text() == "Last response used: llama3.2:3b"
         window.close()
 
 
@@ -475,8 +684,13 @@ def test_on_models_ready_populates_menu(tmp_path):
     with Database(tmp_path / "conversation.db") as db:
         window = _make_window(db)
         window._on_models_ready(["llama3", "mistral", "phi3"])
-        texts = [action.text() for action in window.model_menu.actions()]
-        assert texts == ["llama3", "mistral", "phi3"]
+        models = [
+            action.text() for action in window.model_menu.actions()
+            if action.isCheckable()
+        ]
+        assert models == ["llama3", "mistral", "phi3"]
+        assert window.model_selected_status.text() == "Selected: mistral"
+        assert window.model_runtime_status.text() == "Dogen will use: not loaded"
         assert window.model_menu.isEnabled()
         window.close()
 
@@ -487,7 +701,7 @@ def test_on_models_ready_empty_falls_back_to_config(tmp_path):
         cfg = AppConfig(ollama_model="mistral")
         window = _make_window(db, cfg)
         window._on_models_ready([])
-        assert window._selected_model() == "mistral"
+        assert window._selected_model() == ""
         assert window.model_menu.isEnabled()
         window.close()
 
@@ -817,6 +1031,9 @@ def test_replay_completion_returns_capture_hud_to_ready(tmp_path):
     app = QApplication.instance() or QApplication([])
     with Database(tmp_path / "conversation.db") as db:
         window = _make_window(db)
+        window._on_models_ready(["mistral"])
+        window._speech_ready = True
+        window._loaded_model = "mistral"
         window._last_assistant_text = "Replay this response"
         window._pipeline = object()
 
@@ -850,6 +1067,9 @@ def test_replay_error_keeps_start_recording_operational(tmp_path):
 
     with Database(tmp_path / "conversation.db") as db:
         window = _make_window(db)
+        window._on_models_ready(["mistral"])
+        window._speech_ready = True
+        window._loaded_model = "mistral"
         window._last_assistant_text = "Replay this response"
         window._pipeline = object()
         worker = RunningWorker()

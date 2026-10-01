@@ -19,7 +19,7 @@ def test_chat_requests_resident_model(monkeypatch):
     client = OllamaClient("http://localhost:11434", "mistral")
     client.generate([], lambda _: None, lambda: False)
 
-    assert fake_ollama.chat.call_args.kwargs["keep_alive"] == -1
+    assert fake_ollama.chat.call_args.kwargs["keep_alive"] == "5m"
 
 
 class FakeTranscriber:

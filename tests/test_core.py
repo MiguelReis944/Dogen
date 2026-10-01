@@ -580,7 +580,7 @@ def test_ollama_client_sets_context_window(monkeypatch):
     monkeypatch.setattr("ollama.Client", FakeOllamaClient)
     client = OllamaClient("http://localhost:11434", "mistral")
     client.generate([], lambda token: None, lambda: False)
-    assert calls == [({"num_ctx": 4096, "temperature": 0}, -1)]
+    assert calls == [({"num_ctx": 4096, "temperature": 0}, "5m")]
 
 
 def test_database_session_per_day(tmp_path):

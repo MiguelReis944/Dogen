@@ -92,7 +92,7 @@ class OllamaClient:
         chunks = []
         # Use an explicit context budget and stable decoding for correction feedback.
         for item in self.client.chat(model=self.model, messages=messages, stream=True,
-                                     keep_alive=-1,
+                                     keep_alive="5m",
                                      options={"num_ctx": 4096, "temperature": 0}):
             if cancelled():
                 break
