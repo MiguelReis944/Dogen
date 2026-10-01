@@ -6,7 +6,7 @@ import uuid
 from datetime import date
 
 from PyQt5.QtCore import Qt, QThread, QTimer, pyqtSignal
-from PyQt5.QtGui import QFont, QKeySequence, QTextCursor
+from PyQt5.QtGui import QFont, QKeySequence, QTextCharFormat, QTextCursor, QTextFormat
 from PyQt5.QtWidgets import (QAction, QFileDialog, QGroupBox,
                               QHBoxLayout, QLabel, QLineEdit, QMainWindow,
                               QMessageBox, QProgressBar, QPushButton, QSizePolicy, QSplitter,
@@ -190,6 +190,8 @@ class MainWindow(QMainWindow):
         self.fixes.setPlaceholderText("Short corrections for clear English errors will appear here.")
         fixes_layout.addWidget(self.fixes)
         side_layout.addWidget(self.fixes_group, stretch=3)
+
+        self._apply_practice_font_size()
 
         side.setMinimumWidth(320)
         side.setMaximumWidth(420)
@@ -910,11 +912,34 @@ class MainWindow(QMainWindow):
 
     # ── settings ───────────────────────────────────────────────────────────────
 
+    def _apply_practice_font_size(self):
+        size = self.config.practice_font_size_px
+        for widget in (self.history, self.today, self.fixes):
+            # Update the widget rule before setFont so an existing inline rule
+            # cannot force the old size back onto the QTextEdit document.
+            widget.setStyleSheet(f"font-size: {size}px;")
+            font = widget.font()
+            font.setPixelSize(size)
+            widget.setFont(font)
+            if isinstance(widget, QTextEdit):
+                widget.document().setDefaultFont(font)
+                cursor = widget.textCursor()
+                cursor.select(QTextCursor.Document)
+                text_format = QTextCharFormat()
+                text_format.setProperty(QTextFormat.FontPixelSize, size)
+                cursor.mergeCharFormat(text_format)
+                cursor.clearSelection()
+                widget.setTextCursor(cursor)
+                current_format = widget.currentCharFormat()
+                current_format.setProperty(QTextFormat.FontPixelSize, size)
+                widget.setCurrentCharFormat(current_format)
+
     def _open_settings(self):
         from pathlib import Path
         path = self.settings_path or Path("settings.json")
         dlg = SettingsDialog(self.config, path, parent=self)
         if dlg.exec_():
+            self._apply_practice_font_size()
             if self.config.diagnostics_enabled:
                 diagnostics_path = local_diagnostics_path()
                 if diagnostics_path is None or not configure_local_diagnostics(

@@ -20,6 +20,8 @@ persiste o histórico em SQLite.
 - Mostrar progresso sem chamar atividade de proficiência ou inventar nota de pronúncia.
 - Permitir configurar a meta diária de gravação, com padrão de 15 minutos e persistência
   local em `settings.json`.
+- Permitir ajustar manualmente o tamanho do texto de Conversa, Today e Fixes entre 12 e 24
+  px, com padrão de 15 px e persistência local.
 
 ## Critérios de aceitação e evidências
 

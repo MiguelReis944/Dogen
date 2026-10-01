@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt5.QtCore import Qt
+from PyQt5.QtGui import QTextCursor
 from PyQt5.QtWidgets import QApplication, QPushButton
 
 from nlp.llm import ConversationContext
@@ -526,6 +527,54 @@ def test_settings_persists_daily_recording_goal(tmp_path):
     assert config.daily_recording_goal_minutes == 25
     assert load_config(config_path).daily_recording_goal_minutes == 25
     dialog.close()
+
+
+def test_settings_persists_practice_font_size(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    config_path = tmp_path / "settings.json"
+    config = AppConfig()
+    dialog = SettingsDialog(config, config_path)
+
+    assert dialog._font_size.value() == 15
+    assert (dialog._font_size.minimum(), dialog._font_size.maximum()) == (12, 24)
+    dialog._font_size.setValue(21)
+    dialog._save()
+
+    assert config.practice_font_size_px == 21
+    assert load_config(config_path).practice_font_size_px == 21
+    dialog.close()
+
+
+def test_practice_font_size_updates_only_conversation_today_and_fixes(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        config = AppConfig(practice_font_size_px=19)
+        window = _make_window(db, config)
+        window.history.setHtml("<b>Existing</b> conversation")
+        assert window.history.document().defaultFont().pixelSize() == 19
+        assert window.today.font().pixelSize() == 19
+        assert window.fixes.document().defaultFont().pixelSize() == 19
+        status_font_size = window.status.font().pixelSize()
+
+        dialog = MagicMock()
+
+        def accept_new_font_size():
+            config.practice_font_size_px = 21
+            return 1
+
+        dialog.exec_.side_effect = accept_new_font_size
+        with patch("ui.main_window.SettingsDialog", return_value=dialog):
+            window._open_settings()
+
+        assert window.history.toPlainText() == "Existing conversation"
+        assert window.history.document().defaultFont().pixelSize() == 21
+        existing_text = window.history.textCursor()
+        existing_text.movePosition(QTextCursor.Start)
+        assert existing_text.charFormat().font().pixelSize() == 21
+        assert window.today.font().pixelSize() == 21
+        assert window.fixes.document().defaultFont().pixelSize() == 21
+        assert window.status.font().pixelSize() == status_font_size
+        window.close()
 
 
 def test_response_audio_controls_follow_replay_state(tmp_path):

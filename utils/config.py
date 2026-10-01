@@ -21,6 +21,7 @@ class AppConfig:
     silence_duration_sec: float = 2.0
     context_size: int = 10
     daily_recording_goal_minutes: int = 15
+    practice_font_size_px: int = 15
     input_mode: str = "ptt"  # "vad" | "ptt"
     review_transcript: bool = False  # show editable transcript before sending to LLM
     noise_reduction: bool = True

@@ -12,9 +12,10 @@ O painel principal mostra conversa; `Fixes` separa correções breves e somente 
 Correções de erros reais aparecem em todos os modos e cenários, sem ações para repetir,
 explicar ou pular a correção.
 `Status` mostra carregamento e estágio. `File` concentra cenário, modelo e progresso;
-`Settings` contém revisão de transcrição, opções de captura e a meta de gravação diária
-exibida em Today (15 minutos por padrão). Today mostra o tempo de áudio capturado numa
-única linha; contagens de palavras e fillers são descritas como transcritas/estimadas.
+`Settings` contém revisão de transcrição, opções de captura, a meta de gravação diária
+exibida em Today (15 minutos por padrão) e o tamanho manual do texto de Conversa, Today e
+Fixes (12–24 px, 15 px por padrão). Today mostra o tempo de áudio capturado numa única
+linha; contagens de palavras e fillers são descritas como transcritas/estimadas.
 
 ## Linguagem visual
 

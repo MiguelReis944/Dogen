@@ -92,6 +92,17 @@ class SettingsDialog(QDialog):
         goal_form.addRow("Recording goal:", self._daily_goal)
         outer.addWidget(goal_box)
 
+        # ── practice text size ─────────────────────────────────────────────────
+        text_box = QGroupBox("Appearance")
+        text_form = QFormLayout(text_box)
+        self._font_size = QSpinBox()
+        self._font_size.setObjectName("practiceFontSizePx")
+        self._font_size.setRange(12, 24)
+        self._font_size.setSuffix(" px")
+        self._font_size.setValue(config.practice_font_size_px)
+        text_form.addRow("Practice text size:", self._font_size)
+        outer.addWidget(text_box)
+
         # ── Buttons ────────────────────────────────────────────────────────────
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btns.accepted.connect(self._save)
@@ -107,5 +118,6 @@ class SettingsDialog(QDialog):
         self.config.input_mode          = "ptt"
         self.config.context_size        = self._context_size.value()
         self.config.daily_recording_goal_minutes = self._daily_goal.value()
+        self.config.practice_font_size_px   = self._font_size.value()
         save_config(self.config, self.settings_path)
         self.accept()

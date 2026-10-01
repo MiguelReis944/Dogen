@@ -21,8 +21,10 @@ somente respostas completas.
 
 As interfaces são sinais PyQt5, callbacks de cancelamento, `settings.json`, SQLite e
 as APIs locais do Whisper, Ollama e Coqui. `daily_recording_goal_minutes` configura a
-meta do Today, com padrão de 15 minutos para arquivos de configuração existentes. Não há
-serviço remoto necessário para o fluxo de produto.
+meta do Today, com padrão de 15 minutos para arquivos de configuração existentes.
+`practice_font_size_px` configura o tamanho do texto de Conversa, Today e Fixes entre 12 e
+24 px, com padrão de 15 px para configurações existentes. Não há serviço remoto necessário
+para o fluxo de produto.
 
 Diagnósticos de confiabilidade são locais e opcionais (`diagnostics_enabled`, desligado
 por padrão). Quando ativados, escrevem eventos com campos permitidos na pasta de dados
