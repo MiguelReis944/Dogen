@@ -17,7 +17,8 @@ binaries = []
 hiddenimports = []
 
 # These libraries load plugins, language assets, or model helpers dynamically.
-for package in ("whisper", "ollama", "noisereduce"):
+# Coqui's Korean phonemizer also needs ko_speech_tools' namespace-package data.
+for package in ("whisper", "ollama", "noisereduce", "ko_speech_tools"):
     package_datas, package_binaries, package_imports = collect_all(package)
     datas += package_datas
     binaries += package_binaries

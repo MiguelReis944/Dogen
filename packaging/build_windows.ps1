@@ -27,7 +27,35 @@ try {
 
     & $python "scripts\verify_bundle.py" "build\dist\Dogen"
     if ($LASTEXITCODE -ne 0) {
-        throw "The Dogen app bundle is missing runtime-scanned Coqui TTS config files."
+        throw "The Dogen app bundle is missing required Coqui runtime files."
+    }
+
+    $smokeRoot = [System.IO.Path]::GetFullPath((Join-Path $projectRoot "build\ko-speech-smoke"))
+    $buildRoot = [System.IO.Path]::GetFullPath((Join-Path $projectRoot "build"))
+    $buildPrefix = $buildRoot.TrimEnd([char]'\') + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $smokeRoot.StartsWith($buildPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "The Coqui smoke-test output must stay inside the project build directory."
+    }
+    if (Test-Path -LiteralPath $smokeRoot) {
+        Remove-Item -LiteralPath $smokeRoot -Recurse -Force
+    }
+    try {
+        & $python -m PyInstaller --noconfirm --onedir `
+            --distpath (Join-Path $smokeRoot "dist") `
+            --workpath (Join-Path $smokeRoot "work") `
+            --specpath $smokeRoot `
+            --collect-all ko_speech_tools `
+            --name DogenKoSpeechSmoke "scripts\verify_ko_speech_runtime.py"
+        if ($LASTEXITCODE -ne 0) { throw "Could not build the Coqui runtime smoke test." }
+
+        $smokeExecutable = Join-Path $smokeRoot "dist\DogenKoSpeechSmoke\DogenKoSpeechSmoke.exe"
+        & $smokeExecutable
+        if ($LASTEXITCODE -ne 0) { throw "The frozen Coqui resource smoke test failed." }
+    }
+    finally {
+        if (Test-Path -LiteralPath $smokeRoot) {
+            Remove-Item -LiteralPath $smokeRoot -Recurse -Force
+        }
     }
 
     $compiler = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue

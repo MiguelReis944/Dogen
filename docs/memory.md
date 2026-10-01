@@ -35,3 +35,10 @@
 O relatório de release diz que a implementação está completa, mas a aceitação humana
 continua pendente. Não chame o produto de validado até resolver essas linhas e preserve
 a distinção entre métricas de atividade, desempenho e retenção.
+
+No bundle Windows do PyInstaller, Coqui precisa dos arquivos-fonte em
+`TTS/vocoder/configs` porque lista essa pasta durante a importação. O pacote
+`ko_speech_tools` também exige os recursos do namespace `ko_speech_tools.data` usados
+por `importlib.resources`. O verificador do build compara os recursos relativos ao
+pacote instalado no ambiente de build com o bundle, sem depender do caminho daquela
+máquina.
