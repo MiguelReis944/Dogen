@@ -16,7 +16,8 @@
 - Preserve the user's current `settings.json`, untracked export files, and all private recordings.
 - Do not change the default `small.en` model or microphone/VAD sensitivity based on one recognition or cutoff example; use the private benchmark protocol first.
 - Keep `New Session` as an intentional conversation-context reset; do not add cross-session personal memory without separate approval.
-- Keep corrections distinct from fluency mode and from recognition confidence.
+- Always request concise corrections for meaningful English errors in every mode and scenario; Fluency mode changes conversational style, never disables corrections.
+- Keep only concise correction text in Fixes, separate from spoken conversation; no alternative-phrasing blocks or retry/explain/skip controls.
 - Preserve current definitions: practice time counts captured microphone audio only; interruptions do not become completed turns.
 - Do not claim a fix until focused tests, the full suite, and the relevant manual check pass.
 - Prefer a narrow boundary improvement that directly supports a tested behavior; do not refactor a subsystem merely to make it look cleaner.
@@ -78,8 +79,9 @@ These are incremental quality improvements, not a rewrite. Apply them alongside 
 - Modify: `ui/main_window.py`, `README.md`, and `docs/architecture.md` for the review countdown and its documented behavior.
 - Extend: `tests/test_feedback.py`, `tests/test_pipeline.py`, `tests/test_core.py`, `tests/test_window.py`.
 
-- [x] Add an end-to-end test using a deterministic coaching-mode response with a structured correction. Verify it passes through parsing, storage, and the read-only Fixes view. Add a corresponding Fluency-mode test confirming no correction is fabricated.
-- [ ] Reproduce the empty Fixes case with a known learner error while explicitly confirming Coaching mode. If structured feedback exists but is not displayed, repair that UI/storage boundary; if the model emits no structured feedback, do not promise that every error will be corrected and do not mix in an unrequested prompt rewrite.
+- [x] Add an end-to-end test using a deterministic response with a structured correction. Verify it passes through parsing, storage, and the read-only Fixes view.
+- [x] Verify that Fluency mode and every scenario still request concise corrections for meaningful errors; do not fabricate a correction when the learner's English is already natural.
+- [x] Keep Fixes as concise correction-only read-only text and ensure an available correction is not lost when audio playback is interrupted.
 - [x] Increase transcript auto-send from 5 to 15 seconds, update the visible countdown/status to match, and test auto-send, immediate Enter/send, and Retry/cancel without duplicate turns. Keep the current setting file untouched.
 - [x] Run the focused feedback/window tests, then `python -m pytest -q`.
 
@@ -136,9 +138,37 @@ These are incremental quality improvements, not a rewrite. Apply them alongside 
 - [x] Add tests that inject a recognizable private phrase and verify it is absent from diagnostic output.
 - [x] Stop writing immediately when disabled and tolerate an unavailable local log path without blocking app startup.
 
+### Task 10: Keep Today values current and legible
+
+**Files:**
+- Inspect/modify: `ui/main_window.py` only where refresh behavior is missing.
+- Extend: `tests/test_window.py`.
+
+- [x] Verify that captured audio refreshes immediately when recording finishes and that turn-based values refresh when processing finishes.
+- [x] Refresh the daily aggregate after local midnight even if the app remains open and idle.
+- [x] Show recorded audio with seconds so short recordings are visibly reflected instead of disappearing under one-decimal-minute rounding.
+- [x] Keep the source metric as persisted microphone-recording duration only; do not count model wait or TTS time.
+
+### Task 11: Apply the video follow-up reliability fixes
+
+**Files:**
+- Modify: `ui/conversation_worker.py`, `ui/main_window.py`, `storage/db.py`, and `pipeline.py` only at the affected boundaries.
+- Extend: `tests/test_worker_lifecycle.py`, `tests/test_window.py`, `tests/test_session_restart_recovery.py`, and `tests/test_pipeline_latency.py`.
+
+- [x] Remove voice-triggered cancellation while TTS is playing; preserve explicit **Stop audio** behavior.
+- [x] Preserve non-empty generated response text for replay after playback/stream interruption, without adding interrupted turns to future context or completed-turn metrics.
+- [x] Preserve structured correction text when it was generated before playback interruption.
+- [x] Use the current code-defined coaching prompt on startup even when settings.json contains an older serialized prompt; leave the user's file unchanged.
+- [x] Add local privacy-safe measurements for transcribe duration, LLM time to first token/first sentence and total, and first-audio readiness/TTS time.
+- [x] Run three synthetic local Ollama calls using the updated default prompt. With transcriber and TTS test doubles, the first call measured 2,093/2,233/3,093 ms and the two warm calls 46/171/1,014 ms and 31/171/1,406 ms (first token/first sentence/model total). These isolate model cold-vs-warm latency, not a complete spoken turn or an optimization result.
+- [ ] Run Dogen with diagnostics enabled during real spoken turns and identify which measured stage dominates under normal use; only then make a targeted optimization and compare before/after timings.
+- [x] Add an integration regression: start a new session, restart Dogen against the same database on the same day, and verify the active session remains empty while the old session remains intact.
+- [x] Run focused regressions and the full suite; keep manual end-to-end checks pending.
+
 ## Execution baseline and observations excluded from code changes unless they regress
 
 - Baseline on the available system Python: `python -m pytest -q -p no:cacheprovider` — 140 passed in 18.79s. The Dogen `.venv` is absent; no packages were installed.
+- Final verification after these fixes: `python -m pytest -q -p no:cacheprovider` — 186 passed; `python -m compileall -q main.py pipeline.py ui storage audio utils` and `git diff --check` passed. Manual spoken-turn profiling and end-to-end desktop acceptance remain pending.
 - At implementation start, `settings.json` is pre-existing modified user data and `dogen-session-62b28f04.txt` is a pre-existing untracked export; neither is part of this plan or any commit.
 
 - File loading status, interruption of TTS, Dogen's taskbar identity, configured daily goal, and the empty-Fixes message already have implementations or positive evidence in the current branch; retest before touching them.

@@ -27,6 +27,12 @@ _ALLOWED_EVENTS = {
 _ALLOWED_STATES = {"loading", "ready", "recording", "processing", "error", "shutdown"}
 _ALLOWED_STAGES = {"startup", "capture", "transcribe", "model", "tts", "playback", "storage"}
 _ALLOWED_STOP_REASONS = {"silence", "ptt_release", "timeout", "cancelled"}
+_ALLOWED_MILESTONES = {
+    ("model", "first_token"),
+    ("model", "first_sentence_ready"),
+    ("tts", "first_audio_ready"),
+    ("tts", "synthesis_total"),
+}
 _SAFE_ERROR_TYPE = re.compile(r"^[A-Z][A-Za-z0-9_]{0,63}$")
 _TRACE_ID = re.compile(r"^[a-f0-9]{32}$")
 
@@ -87,6 +93,13 @@ def log_diagnostic(event: str, **fields) -> None:
         if key == "state" and isinstance(value, str) and value in _ALLOWED_STATES:
             payload[key] = value
         elif key == "stage" and isinstance(value, str) and value in _ALLOWED_STAGES:
+            payload[key] = value
+        elif (
+            key == "milestone"
+            and event == "stage_completed"
+            and isinstance(value, str)
+            and (fields.get("stage"), value) in _ALLOWED_MILESTONES
+        ):
             payload[key] = value
         elif (
             key == "stop_reason"

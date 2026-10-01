@@ -137,7 +137,7 @@ def test_main_text_is_larger_and_daily_goal_is_visible(tmp_path):
         window.today.ensurePolished()
         summary = window.today.text().lower()
         assert window.today.font().pixelSize() >= 15
-        assert "recorded audio: 0.0 / 15 min" in summary
+        assert "recorded audio: 0m 00s / 15 min" in summary
         window.close()
 
 
@@ -284,7 +284,8 @@ def test_configuration_actions_are_available_only_while_worker_waits_for_recordi
         window.flow_action.trigger()
         assert window._selected_model() == "llama3"
         assert window._selected_scenario == "Job interview"
-        assert window._corrections_on is False
+        assert window._fluency_mode is True
+        assert "clear English error" in window.context.system_prompt
 
         window._on_recording_started()
         assert not window.loading_menu_action.isVisible()
@@ -553,6 +554,7 @@ def test_interrupted_reply_is_kept_in_history_but_not_context(tmp_path):
     app = QApplication.instance() or QApplication([])
     with Database(tmp_path / "conversation.db") as db:
         window = _make_window(db)
+        window._pipeline = object()
         result = TurnResult(
             "Tell me about it", "I think that", CoachFeedback(),
             TurnMetrics(3, 0, False, None),
@@ -565,8 +567,36 @@ def test_interrupted_reply_is_kept_in_history_but_not_context(tmp_path):
         assert "Tell me about it" in window.history.toPlainText()
         assert "response interrupted" in window.history.toPlainText().lower()
         assert "I think that" in window.history.toPlainText()
+        assert window._last_assistant_text == "I think that"
+        window._on_finished()
+        assert window.replay_response_button.isEnabled()
         assert db.recent_context_messages("session", 10) == []
         assert db.session_stats("session")["turns"] == 0
+        window.close()
+
+
+def test_interrupted_reply_keeps_structured_correction_in_read_only_fixes(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        feedback = CoachFeedback(
+            correction="I goed yesterday → I went yesterday",
+            category="verb_tense",
+        )
+        window._on_completed(
+            TurnResult(
+                "I goed yesterday", "I think that", feedback,
+                TurnMetrics(3, 0, False, "verb_tense"),
+                is_complete=False, error="Response playback interrupted",
+            ),
+            500,
+        )
+
+        assert "I goed yesterday → I went yesterday" in window.fixes.toPlainText()
+        assert window.fixes.isReadOnly()
+        assert db.feedback_for_session("session") == [feedback]
+        assert db.session_stats("session")["turns"] == 0
+        assert db.recent_context_messages("session", 10) == []
         window.close()
 
 
@@ -813,8 +843,8 @@ def test_completed_turn_renders_and_persists_feedback_separately(tmp_path):
         assert "Coach feedback" not in conversation
         assert "I goed home → I went home" not in conversation
         assert "I goed home → I went home" in fixes
-        assert "I headed home." in fixes
-        assert "Category: verb tense" in fixes
+        assert "I headed home." not in fixes
+        assert "Category:" not in fixes
         assert window.fixes_group.title() == "Fixes"
         assert window.status_group is None
         assert db.feedback_for_session("session") == [result.feedback]
@@ -855,7 +885,7 @@ def test_today_shows_passive_activity_metrics_without_action_buttons(tmp_path):
 
         summary = window.today.text().lower()
         assert not window.today.findChildren(QPushButton)
-        assert "recorded audio: 0.0 / 15 min" in summary
+        assert "recorded audio: 0m 00s / 15 min" in summary
         assert "words transcribed" in summary
         assert "completed turns" in summary
         assert "fillers / 100 transcribed words" in summary
@@ -865,6 +895,26 @@ def test_today_shows_passive_activity_metrics_without_action_buttons(tmp_path):
         assert "completed turns: 1" in summary
         assert "fillers / 100 transcribed words: 4.0" in summary
         assert "coach corrections: 1" in summary
+        window.close()
+
+
+def test_today_refreshes_turn_metrics_when_response_completes(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        assert "Completed turns: 0" in window.today.text()
+        window._on_completed(
+            TurnResult(
+                "I goed home", "What happened next?",
+                CoachFeedback(correction="I goed home → I went home", category="verb_tense"),
+                TurnMetrics(3, 0, False, "verb_tense"),
+            ),
+            100,
+        )
+
+        assert "Words transcribed: 3" in window.today.text()
+        assert "Completed turns: 1" in window.today.text()
+        assert "Coach corrections: 1" in window.today.text()
         window.close()
 
 
@@ -881,8 +931,20 @@ def test_today_counts_only_microphone_recording_time(tmp_path):
         window = _make_window(db)
 
         summary = window.today.text().lower()
-        assert "recorded audio: 1.5 / 15 min" in summary
+        assert "recorded audio: 1m 30s / 15 min" in summary
         assert "120" not in summary
+        window.close()
+
+
+def test_today_refreshes_recorded_audio_when_recording_finishes(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        assert "Recorded audio: 0m 00s / 15 min" in window.today.text()
+
+        window._on_recording_finished("ptt_release", 6.24)
+
+        assert "Recorded audio: 0m 06s / 15 min" in window.today.text()
         window.close()
 
 
@@ -892,7 +954,7 @@ def test_today_uses_configured_recording_goal(tmp_path):
         db.add_recording_duration("session", 90.0)
         window = _make_window(db, AppConfig(daily_recording_goal_minutes=25))
 
-        assert "Recorded audio: 1.5 / 25 min" in window.today.text()
+        assert "Recorded audio: 1m 30s / 25 min" in window.today.text()
         window.close()
 
 
@@ -917,7 +979,7 @@ def test_today_renders_the_shared_one_day_progress_aggregate(tmp_path):
         aggregate.assert_called_once_with(1, date.today())
 
         summary = window.today.text()
-        assert "Recorded audio: 3.5 / 15 min" in summary
+        assert "Recorded audio: 3m 30s / 15 min" in summary
         assert "Words transcribed: 12" in summary
         assert "Completed turns: 2" in summary
         assert "Fillers / 100 transcribed words: 8.3" in summary
@@ -942,8 +1004,38 @@ def test_today_refreshes_after_settings_goal_changes(tmp_path):
         with patch("ui.main_window.SettingsDialog", return_value=dialog):
             window._open_settings()
 
-        assert "Recorded audio: 1.0 / 30 min" in window.today.text()
+        assert "Recorded audio: 1m 00s / 30 min" in window.today.text()
         window.close()
+
+
+def test_today_refreshes_after_local_day_rollover_while_idle(tmp_path, monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    days = [date(2026, 9, 30)]
+
+    class MutableDate(date):
+        @classmethod
+        def today(cls):
+            return days[0]
+
+    initial_day = days[0]
+    old_day = ProgressStats(1, 1, 1, 1.5, 1, 12, None, None, {}, 0, 0)
+    new_day = ProgressStats(1, 0, 0, 0, 0, 0, None, None, {}, 0, 0)
+    with Database(tmp_path / "conversation.db") as db:
+        with patch.object(
+            ProgressService,
+            "stats",
+            side_effect=lambda _period, current: old_day if current == initial_day else new_day,
+        ):
+            monkeypatch.setattr("ui.main_window.date", MutableDate)
+            window = _make_window(db)
+            assert "Recorded audio: 1m 30s / 15 min" in window.today.text()
+
+            days[0] = date(2026, 10, 1)
+            window._today_refresh_timer.timeout.emit()
+
+            assert "Recorded audio: 0m 00s / 15 min" in window.today.text()
+            assert "Words transcribed: 0" in window.today.text()
+            window.close()
 
 
 def test_today_includes_turns_after_21_local_when_utc_date_has_advanced(tmp_path, monkeypatch):
@@ -1054,7 +1146,7 @@ def test_fixes_is_read_only_without_correction_input(tmp_path):
 
         assert window.fixes.isReadOnly()
         assert not hasattr(window, "correction_input")
-        assert "no clear corrections" in window.fixes.toPlainText().lower()
+        assert "no correction yet" in window.fixes.toPlainText().lower()
         window.close()
 
 
@@ -1071,7 +1163,7 @@ def test_fix_from_legacy_conversation_is_rendered_in_fixes(tmp_path):
 
         fixes = window.fixes.toPlainText()
         assert "I goed → I went" in fixes
-        assert "I headed home." in fixes
+        assert "I headed home." not in fixes
         window.close()
 
 

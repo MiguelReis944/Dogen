@@ -8,6 +8,9 @@
 - A tela principal prioriza conversa: Today é passivo e a meta de gravação é configurável
   em Settings (15 minutos por padrão), baseada nos frames realmente capturados; Fixes é
   somente leitura; volume aparece durante gravação.
+- O modo Fluency muda o estilo conversacional, mas não desativa correções de erros
+  significativos em inglês. Fixes mostra texto breve, sem controles de correção; não se
+  inventam correções para frases naturais.
 - Palavras e fillers são estimados a partir da transcrição final enviada ao coach, que pode
   ter sido editada; o streak conta dias com tentativa do usuário, mesmo se a resposta for
   interrompida.

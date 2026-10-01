@@ -117,7 +117,8 @@ class Database:
             self._insert_feedback(session_id, parse_reply(assistant_text).feedback)
 
     def add_interrupted_turn(self, session_id: str, user_text: str, assistant_text: str,
-                             model_used: str, latency_ms: int) -> None:
+                             model_used: str, latency_ms: int,
+                             feedback: CoachFeedback | None = None) -> None:
         """Keep a failed streamed answer visible without treating it as context or a completed turn."""
         with self.connection:
             self.connection.executemany(
@@ -128,6 +129,8 @@ class Database:
                     (session_id, "assistant", assistant_text, model_used, latency_ms),
                 ],
             )
+            if feedback is not None:
+                self._insert_feedback(session_id, feedback)
 
     def add_completed_turn(self, session_id: str, user_text: str, assistant_text: str,
                            model_used: str, latency_ms: int, feedback: CoachFeedback,

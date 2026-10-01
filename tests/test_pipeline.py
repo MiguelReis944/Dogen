@@ -143,7 +143,8 @@ def test_pipeline_respects_cancellation_after_tts():
     with patch("pipeline.log_diagnostic") as diagnostic:
         result = pipeline.run(
             [0.1], context, lambda kind, value: events.append((kind, value)),
-            lambda: cancel_after[0],
+            lambda: False,
+            playback_stop_requested=lambda: cancel_after[0],
         )
 
     assert isinstance(result, TurnResult)
@@ -156,6 +157,46 @@ def test_pipeline_respects_cancellation_after_tts():
         call.args[0] == "turn_failed" and call.kwargs.get("stage") == "model"
         for call in diagnostic.call_args_list
     )
+    assert context.messages == []
+
+
+def test_stop_audio_between_sentences_returns_replayable_partial_turn():
+    first_audio_played = threading.Event()
+    stop_observed = threading.Event()
+    stop_checks_after_audio = [0]
+
+    class StreamingLLM:
+        def generate(self, _messages, on_chunk, _cancelled):
+            on_chunk("The first sentence is complete. ")
+            assert first_audio_played.wait(timeout=1)
+            assert stop_observed.wait(timeout=1)
+
+    class PlayerAfterFirstSentence:
+        def play(self, _samples, _sample_rate, _cancelled, on_volume=None):
+            first_audio_played.set()
+
+    def stop_requested():
+        if first_audio_played.is_set():
+            stop_checks_after_audio[0] += 1
+            if stop_checks_after_audio[0] >= 2:
+                stop_observed.set()
+                return True
+        return False
+
+    context = ConversationContext()
+    pipeline = ProcessingPipeline(
+        FakeTranscriber(), StreamingLLM(), FakeSynthesizer(), PlayerAfterFirstSentence()
+    )
+
+    result = pipeline.run(
+        [0.1], context, lambda *_: None, lambda: False,
+        playback_stop_requested=stop_requested,
+    )
+
+    assert isinstance(result, TurnResult)
+    assert result.reply == "The first sentence is complete."
+    assert result.is_complete is False
+    assert result.error == "Response playback interrupted"
     assert context.messages == []
 
 

@@ -8,7 +8,9 @@ a transcrição antes do envio. Depois pode ouvir novamente ou parar o áudio.
 
 ## Interação e comportamento
 
-O painel principal mostra conversa; `Fixes` separa correções e frases alternativas;
+O painel principal mostra conversa; `Fixes` separa correções breves e somente leitura.
+Correções de erros reais aparecem em todos os modos e cenários, sem ações para repetir,
+explicar ou pular a correção.
 `Status` mostra carregamento e estágio. `File` concentra cenário, modelo e progresso;
 `Settings` contém revisão de transcrição, opções de captura e a meta de gravação diária
 exibida em Today (15 minutos por padrão). Today mostra o tempo de áudio capturado numa

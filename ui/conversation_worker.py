@@ -3,7 +3,6 @@
 import threading
 import time
 
-import numpy as np
 from PyQt5.QtCore import QThread, pyqtSignal
 
 from audio.player import Player
@@ -39,10 +38,8 @@ class ConversationWorker(QThread):
         self.built_pipeline = None
         self._ptt_start_event = threading.Event()
         self._ptt_stop_event  = threading.Event()
-        self._barge_in        = False
+        self._stop_playback_requested = False
         self._playback_active = False
-        self._barge_in_thread: threading.Thread | None = None
-        self._barge_in_stop_event = threading.Event()
         self._confirm_event   = threading.Event()
         self._confirmed_text  = ""
 
@@ -50,9 +47,6 @@ class ConversationWorker(QThread):
 
     def _cancelled(self):
         return self.isInterruptionRequested()
-
-    def _cancelled_or_barge_in(self):
-        return self.isInterruptionRequested() or self._barge_in
 
     # ── PTT ────────────────────────────────────────────────────────────────────
 
@@ -77,7 +71,7 @@ class ConversationWorker(QThread):
 
     def stop_playback(self):
         if self._playback_active:
-            self._barge_in = True
+            self._stop_playback_requested = True
 
     def _make_confirm_fn(self):
         def _confirm(transcript: str) -> str:
@@ -90,49 +84,6 @@ class ConversationWorker(QThread):
             return ""
         return _confirm
 
-    # ── barge-in ───────────────────────────────────────────────────────────────
-
-    def _start_barge_in_detector(self):
-        threshold = self.config.vad_threshold * 1.5
-
-        def _listen():
-            consecutive = 0
-            try:
-                import sounddevice as sd
-                with sd.InputStream(samplerate=16000, channels=1, dtype="float32",
-                                    blocksize=1600, device=self.config.mic_device) as stream:
-                    while (
-                        not self._cancelled_or_barge_in()
-                        and not self._barge_in_stop_event.is_set()
-                    ):
-                        block, _ = stream.read(1600)
-                        if self._barge_in_stop_event.is_set():
-                            break
-                        if not self._playback_active:
-                            consecutive = 0
-                            continue
-                        rms = float(np.sqrt(np.mean(block[:, 0] ** 2)))
-                        if rms > threshold:
-                            consecutive += 1
-                            if consecutive >= 2:
-                                self._barge_in = True
-                                break
-                        else:
-                            consecutive = 0
-            except Exception:
-                pass
-
-        t = threading.Thread(target=_listen, daemon=True)
-        t.start()
-        return t
-
-    def _stop_barge_in_detector(self):
-        self._barge_in_stop_event.set()
-        thread = self._barge_in_thread
-        if thread is not None:
-            thread.join()
-            self._barge_in_thread = None
-
     # ── progress relay ─────────────────────────────────────────────────────────
 
     def _emit_progress(self, kind, value):
@@ -142,9 +93,6 @@ class ConversationWorker(QThread):
             self.response_chunk.emit(value)
         elif kind == "audio_playing":
             self._playback_active = True
-            if self._barge_in_thread is None or not self._barge_in_thread.is_alive():
-                self._barge_in_stop_event.clear()
-                self._barge_in_thread = self._start_barge_in_detector()
             self.audio_playing.emit()
         elif kind == "processing":
             self.status_message.emit(value)
@@ -275,7 +223,7 @@ class ConversationWorker(QThread):
                     self.ready.emit()
                     continue
 
-                self._barge_in = False
+                self._stop_playback_requested = False
                 self._playback_active = False
                 started = time.monotonic()
 
@@ -283,25 +231,22 @@ class ConversationWorker(QThread):
                     confirm_fn = self._make_confirm_fn() if self.config.review_transcript else None
                     result = pipeline.run(
                         samples, self.context, self._emit_progress,
-                        self._cancelled_or_barge_in,
+                        self._cancelled,
                         confirm_fn=confirm_fn,
+                        playback_stop_requested=lambda: self._stop_playback_requested,
                     )
                     if result:
                         self.turn_completed.emit(result, int((time.monotonic() - started) * 1000))
                 except TurnCancelled:
                     self._playback_active = False
-                    if self._barge_in and not self.isInterruptionRequested():
-                        # User started speaking during playback: restart recording immediately
-                        self._stop_barge_in_detector()
-                        self._barge_in = False
+                    if self._stop_playback_requested and not self.isInterruptionRequested():
+                        self._stop_playback_requested = False
                         self.ready.emit()
                         continue
                     return
                 except Exception as exc:
                     self.error.emit(str(exc))
-                finally:
-                    self._playback_active = False
-                    self._stop_barge_in_detector()
+                self._playback_active = False
 
                 self.ready.emit()
 
@@ -310,5 +255,3 @@ class ConversationWorker(QThread):
                 "turn_failed", stage="startup", error_type=type(exc).__name__
             )
             self.error.emit(str(exc))
-        finally:
-            self._stop_barge_in_detector()

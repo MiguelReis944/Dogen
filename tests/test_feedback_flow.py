@@ -6,7 +6,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt5.QtWidgets import QApplication
 
 from nlp.feedback import CoachFeedback
-from nlp.llm import ConversationContext, build_system_prompt
+from nlp.llm import SCENARIOS, ConversationContext, build_system_prompt
 from pipeline import ProcessingPipeline
 from storage.db import Database
 from ui.main_window import MainWindow
@@ -31,8 +31,10 @@ class FixedPlayer:
 class FixedLLM:
     def __init__(self, response):
         self.response = response
+        self.messages = None
 
     def generate(self, messages, on_chunk, cancelled):
+        self.messages = messages
         on_chunk(self.response)
         return self.response
 
@@ -49,7 +51,7 @@ def _window(db, context):
 def test_coaching_feedback_flows_from_model_text_to_fixes(tmp_path):
     app = QApplication.instance() or QApplication([])
     context = ConversationContext(
-        system_prompt=build_system_prompt("Free conversation", corrections=True)
+        system_prompt=build_system_prompt("Free conversation", fluency_mode=False)
     )
     response = (
         "Nice try! What happened next?\n"
@@ -76,19 +78,23 @@ def test_coaching_feedback_flows_from_model_text_to_fixes(tmp_path):
                 better_phrasing="I went there yesterday.",
                 category="verb_tense",
             )
-            assert "I goed yesterday → I went yesterday" in fixes
-            assert "I went there yesterday." in fixes
-            assert "Category: verb tense" in fixes
+            assert fixes.strip() == "I goed yesterday → I went yesterday"
+            assert "More natural:" not in fixes
         finally:
             window.close()
 
 
-def test_fluency_mode_does_not_create_fixes_without_structured_feedback(tmp_path):
+def test_fluency_mode_keeps_corrections_enabled_and_displays_them_as_text(tmp_path):
     app = QApplication.instance() or QApplication([])
     context = ConversationContext(
-        system_prompt=build_system_prompt("Free conversation", corrections=False)
+        system_prompt=build_system_prompt("Free conversation", fluency_mode=True)
     )
-    llm = FixedLLM("Sounds like a busy day. What did you do next?")
+    response = (
+        "Sounds like a busy day. What did you do next?\n"
+        "[Correction: I goed yesterday → I went yesterday]\n"
+        "[Category: verb_tense]"
+    )
+    llm = FixedLLM(response)
     pipeline = ProcessingPipeline(FixedTranscriber(), llm, FixedSynthesizer(), FixedPlayer())
 
     with Database(tmp_path / "conversation.db") as db:
@@ -100,8 +106,22 @@ def test_fluency_mode_does_not_create_fixes_without_structured_feedback(tmp_path
         app, window = _window(db, context)
         try:
             window._render_history()
-            assert result.feedback.is_empty
-            assert "no clear corrections" in window.fixes.toPlainText().lower()
-            assert db.feedback_for_session("session") == []
+            assert result.feedback.correction == "I goed yesterday → I went yesterday"
+            assert "I goed yesterday → I went yesterday" in window.fixes.toPlainText()
+            assert window.fixes.isReadOnly()
+            assert db.feedback_for_session("session") == [result.feedback]
+            assert "Do not silently skip a clear English error" in llm.messages[0]["content"]
+            assert "never invent a correction for natural English" in llm.messages[0]["content"]
+            assert "Do NOT add any bracket annotation blocks" not in llm.messages[0]["content"]
         finally:
             window.close()
+
+
+def test_all_scenarios_require_corrections_without_inventing_them():
+    for scenario in SCENARIOS:
+        for fluency_mode in (False, True):
+            prompt = build_system_prompt(scenario, fluency_mode=fluency_mode)
+
+            assert "Do not silently skip a clear English error" in prompt
+            assert "never invent a correction for natural English" in prompt
+            assert "occasional grammar slip" not in prompt

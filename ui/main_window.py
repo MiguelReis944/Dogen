@@ -120,7 +120,7 @@ class MainWindow(QMainWindow):
         self._replay_error = None
         self._response_notice = None
         self._restart_after_settings = False
-        self._corrections_on = True
+        self._fluency_mode = False
         self._capture_state = CaptureState.READY
         self._record_when_ready = False
         self.status_group = None
@@ -187,7 +187,7 @@ class MainWindow(QMainWindow):
         self.fixes = QTextEdit()
         self.fixes.setObjectName("fixesPanel")
         self.fixes.setReadOnly(True)
-        self.fixes.setPlaceholderText("Corrections and better phrasing will appear here.")
+        self.fixes.setPlaceholderText("Short corrections for clear English errors will appear here.")
         fixes_layout.addWidget(self.fixes)
         side_layout.addWidget(self.fixes_group, stretch=3)
 
@@ -262,6 +262,11 @@ class MainWindow(QMainWindow):
         self._review_timer.setInterval(1000)
         self._review_timer.timeout.connect(self._review_tick)
         self._review_seconds_left = 0
+
+        self._today_refresh_timer = QTimer(self)
+        self._today_refresh_timer.setInterval(60_000)
+        self._today_refresh_timer.timeout.connect(self._render_today)
+        self._today_refresh_timer.start()
 
         self.setCentralWidget(body)
         self._set_capture_state("ready", self._idle_instruction())
@@ -468,7 +473,7 @@ class MainWindow(QMainWindow):
     # ── flow / scenario ────────────────────────────────────────────────────────
 
     def _on_flow_toggled(self, fluency_mode: bool):
-        self._corrections_on = not fluency_mode
+        self._fluency_mode = fluency_mode
         self._apply_system_prompt()
 
     def _on_scenario_changed(self, scenario_key: str):
@@ -478,7 +483,9 @@ class MainWindow(QMainWindow):
 
     def _apply_system_prompt(self):
         scenario = self._selected_scenario
-        self.context.system_prompt = build_system_prompt(scenario, corrections=self._corrections_on)
+        self.context.system_prompt = build_system_prompt(
+            scenario, fluency_mode=self._fluency_mode
+        )
 
     # ── stats ──────────────────────────────────────────────────────────────────
 
@@ -493,13 +500,15 @@ class MainWindow(QMainWindow):
 
     def _render_today(self):
         stats = ProgressService(self.db).stats(1, date.today())
+        recorded_seconds = int(round(stats.minutes_practiced * 60))
+        recorded_time = f"{recorded_seconds // 60}m {recorded_seconds % 60:02d}s"
         filler_text = (
             f"{stats.fillers_per_100_words:.1f}"
             if stats.fillers_per_100_words is not None
             else "Not enough data"
         )
         self.today.setText(
-            f"Recorded audio: {stats.minutes_practiced:.1f} / "
+            f"Recorded audio: {recorded_time} / "
             f"{self.config.daily_recording_goal_minutes} min\n"
             f"Words transcribed: {stats.words_transcribed}\n"
             f"Completed turns: {stats.completed_turns}\n"
@@ -546,23 +555,16 @@ class MainWindow(QMainWindow):
         feedback_items = self.db.feedback_for_session(self.session_id)
         if not feedback_items:
             self.fixes.setPlainText(
-                "No clear corrections have been recorded for this session yet."
+                "No correction yet. Dogen will show a short text correction when your English needs one."
             )
             return
         for feedback in feedback_items:
             self.fixes.append(self._format_feedback(feedback))
 
     def _format_feedback(self, feedback: CoachFeedback):
-        lines = ["<b>Coach feedback</b>"]
+        lines = []
         if feedback.correction:
-            lines.append(f'<span style="color:#e67e22">Correction: {html.escape(feedback.correction)}</span>')
-        if feedback.better_phrasing:
-            lines.append(
-                f'<span style="color:#27ae60">Better phrasing: '
-                f'{html.escape(feedback.better_phrasing)}</span>'
-            )
-        if feedback.category:
-            lines.append(f"Category: {html.escape(feedback.category.replace('_', ' '))}")
+            lines.append(f'<span style="color:#e67e22">{html.escape(feedback.correction)}</span>')
         return "<br>".join(lines)
 
     # ── start / stop ───────────────────────────────────────────────────────────
@@ -806,8 +808,9 @@ class MainWindow(QMainWindow):
                     result.reply,
                     self._selected_model(),
                     latency_ms,
+                    result.feedback,
                 )
-                self._last_assistant_text = ""
+                self._last_assistant_text = result.reply
                 self._response_notice = (
                     "Response interrupted and saved: "
                     + (result.error or "the model stream ended unexpectedly")

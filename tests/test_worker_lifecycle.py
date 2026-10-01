@@ -1,55 +1,34 @@
 import sys
-import threading
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QApplication
 
 from nlp.llm import ConversationContext
-from pipeline import TurnCancelled
-from ui.main_window import ConversationWorker
+from ui.conversation_worker import ConversationWorker
 from utils.config import AppConfig
 
 
-def _make_worker(monkeypatch, after_first_playback):
+def _run_worker(monkeypatch, playback_action):
     app = QApplication.instance() or QApplication([])
-    detector_stop = threading.Event()
-    detector_opened = threading.Event()
-    detector_closed = threading.Event()
-    active_streams = set()
-    streams_lock = threading.Lock()
-    active_at_recording_start = []
+    input_stream_attempts = []
 
-    class FakeInputStream:
+    class ForbiddenInputStream:
         def __init__(self, **_kwargs):
-            pass
+            input_stream_attempts.append(True)
+            raise AssertionError("playback must not open a microphone monitor")
 
-        def __enter__(self):
-            with streams_lock:
-                active_streams.add(self)
-            detector_opened.set()
-            return self
-
-        def read(self, frames):
-            detector_stop.wait(timeout=3)
-            return np.zeros((frames, 1), dtype=np.float32), None
-
-        def __exit__(self, _exc_type, _exc, _traceback):
-            with streams_lock:
-                active_streams.discard(self)
-            detector_closed.set()
-            return False
-
-    monkeypatch.setitem(sys.modules, "sounddevice", SimpleNamespace(InputStream=FakeInputStream))
+    monkeypatch.setitem(
+        sys.modules, "sounddevice", SimpleNamespace(InputStream=ForbiddenInputStream)
+    )
 
     class FakeRecorder:
         def __init__(self, *_args, **_kwargs):
             pass
 
         def record(self, *_args, **_kwargs):
-            with streams_lock:
-                active_at_recording_start.append(len(active_streams))
             return SimpleNamespace(
                 samples=np.ones(3200, dtype=np.float32),
                 stop_reason="ptt_release",
@@ -60,15 +39,19 @@ def _make_worker(monkeypatch, after_first_playback):
         llm = SimpleNamespace(model="mistral")
 
         def __init__(self):
+            self.cancelled_during_playback = None
+            self.playback_stop_requested = None
             self.calls = 0
-            self.after_first_playback = after_first_playback
 
-        def run(self, _audio, _context, emit, _cancelled, **_kwargs):
+        def run(self, _audio, _context, emit, cancelled, playback_stop_requested=None, **_kwargs):
             self.calls += 1
             if self.calls == 1:
                 emit("audio_playing", "")
-                assert detector_opened.wait(timeout=1)
-                self.after_first_playback()
+                self.cancelled_during_playback = cancelled()
+                playback_action(worker, cancelled)
+                self.playback_stop_requested = (
+                    playback_stop_requested() if playback_stop_requested else False
+                )
             return None
 
     pipeline = FakePipeline()
@@ -77,66 +60,61 @@ def _make_worker(monkeypatch, after_first_playback):
     worker = ConversationWorker(
         AppConfig(input_mode="ptt"), ConversationContext(), "mistral", pipeline=pipeline
     )
-    # The fake blocking read is released only when production lifecycle cleanup
-    # signals the detector to stop.
-    worker._barge_in_stop_event = detector_stop
 
-    waiting_count = 0
+    wait_count = 0
 
-    def start_next_recording():
-        nonlocal waiting_count
-        waiting_count += 1
-        if waiting_count <= 2:
+    def handle_waiting_for_ptt():
+        nonlocal wait_count
+        wait_count += 1
+        if wait_count == 1:
             worker.begin_ptt()
         else:
             worker.requestInterruption()
 
-    worker.waiting_for_ptt.connect(start_next_recording, Qt.DirectConnection)
-    return (
-        app,
-        worker,
-        pipeline,
-        active_at_recording_start,
-        active_streams,
-        detector_closed,
-        detector_stop,
-    )
+    worker.waiting_for_ptt.connect(handle_waiting_for_ptt, Qt.DirectConnection)
+    return app, worker, pipeline, input_stream_attempts
 
 
-def test_barge_in_stream_closes_before_next_recording(monkeypatch):
-    app, worker, _pipeline, active_at_recording_start, active_streams, detector_closed, detector_stop = (
-        _make_worker(monkeypatch, lambda: None)
+def _user_speaks_during_playback(_worker, _cancelled):
+    # Recording speech is no longer monitored as a playback cancellation signal.
+    return None
+
+
+def test_user_speech_does_not_cancel_playback_or_open_a_second_mic_stream(monkeypatch):
+    app, worker, pipeline, input_stream_attempts = _run_worker(
+        monkeypatch, _user_speaks_during_playback
     )
     try:
         worker.start()
         assert worker.wait(2500)
 
-        assert active_at_recording_start == [0, 0]
-        assert detector_closed.is_set()
-        assert not active_streams
+        assert pipeline.cancelled_during_playback is False
+        assert pipeline.calls == 1
+        assert input_stream_attempts == []
     finally:
-        detector_stop.set()
         if worker.isRunning():
+            worker.requestInterruption()
             worker.wait(1000)
 
 
-def test_barge_in_stream_closes_when_worker_is_interrupted(monkeypatch):
-    app, worker, pipeline, _recording_starts, active_streams, detector_closed, detector_stop = (
-        _make_worker(monkeypatch, lambda: None)
-    )
+def test_manual_stop_audio_still_cancels_playback(monkeypatch):
+    def stop_audio(worker, cancelled):
+        worker.stop_playback()
+        assert not cancelled()
 
-    def interrupt_worker():
-        worker.requestInterruption()
-        raise TurnCancelled()
-
-    pipeline.after_first_playback = interrupt_worker
+    app, worker, pipeline, input_stream_attempts = _run_worker(monkeypatch, stop_audio)
+    ready_count = []
+    worker.ready.connect(lambda: ready_count.append(True), Qt.DirectConnection)
     try:
         worker.start()
         assert worker.wait(2500)
 
-        assert detector_closed.is_set()
-        assert not active_streams
+        assert pipeline.cancelled_during_playback is False
+        assert pipeline.playback_stop_requested is True
+        assert pipeline.calls == 1
+        assert ready_count == [True]
+        assert input_stream_attempts == []
     finally:
-        detector_stop.set()
         if worker.isRunning():
+            worker.requestInterruption()
             worker.wait(1000)

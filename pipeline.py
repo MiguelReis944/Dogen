@@ -67,25 +67,70 @@ class ProcessingPipeline:
         self.player = player
 
     def speak(self, text: str, emit: Callable[[str, object], None],
-              cancelled: Callable[[], bool]) -> None:
+              cancelled: Callable[[], bool], trace_id: str | None = None,
+              tts_timing: dict | None = None) -> None:
         spoken = _for_tts(text)
         if not spoken:
             return
         emit("audio_playing", "")
-        for wav, sample_rate in self.synthesizer.synthesize_stream(spoken):
-            if cancelled():
-                raise TurnCancelled()
-            self.player.play(
-                wav,
-                sample_rate,
-                cancelled,
-                on_volume=lambda rms: emit("speech_volume", str(rms)),
-            )
-            if cancelled():
-                raise TurnCancelled()
+        synthesis_started = monotonic()
+        if tts_timing is not None and tts_timing["started"] is None:
+            tts_timing["started"] = synthesis_started
+        synthesis_duration = 0.0
+        try:
+            iterator_started = monotonic()
+            try:
+                audio_chunks = iter(self.synthesizer.synthesize_stream(spoken))
+            finally:
+                synthesis_duration += monotonic() - iterator_started
+
+            while True:
+                next_started = monotonic()
+                try:
+                    chunk = next(audio_chunks)
+                except StopIteration:
+                    synthesis_duration += monotonic() - next_started
+                    break
+                except Exception:
+                    synthesis_duration += monotonic() - next_started
+                    raise
+                audio_ready_at = monotonic()
+                synthesis_duration += audio_ready_at - next_started
+                if tts_timing is not None and not tts_timing["first_audio_ready"]:
+                    first_ready_started = tts_timing["started"]
+                    log_diagnostic(
+                        "stage_completed",
+                        stage="tts",
+                        milestone="first_audio_ready",
+                        duration_ms=int((audio_ready_at - first_ready_started) * 1000),
+                        trace_id=trace_id,
+                    )
+                    tts_timing["first_audio_ready"] = True
+
+                wav, sample_rate = chunk
+                if cancelled():
+                    raise TurnCancelled()
+                self.player.play(
+                    wav,
+                    sample_rate,
+                    cancelled,
+                    on_volume=lambda rms: emit("speech_volume", str(rms)),
+                )
+                if cancelled():
+                    raise TurnCancelled()
+        finally:
+            # Sum only time spent obtaining chunks, excluding player playback pauses.
+            if tts_timing is not None:
+                tts_timing["synthesis_duration"] += synthesis_duration
 
     def run(self, audio, context: ConversationContext, emit: Callable[[str, str], None],
-            cancelled: Callable[[], bool], confirm_fn: Callable[[str], str] | None = None):
+            cancelled: Callable[[], bool], confirm_fn: Callable[[str], str] | None = None,
+            playback_stop_requested: Callable[[], bool] | None = None):
+        playback_stop_requested = playback_stop_requested or (lambda: False)
+
+        def audio_cancelled():
+            return cancelled() or playback_stop_requested()
+
         if cancelled():
             raise TurnCancelled()
         trace_id = uuid.uuid4().hex
@@ -134,9 +179,20 @@ class ProcessingPipeline:
         def _stream_llm():
             buf = ""
             stage_started = monotonic()
+            first_token_recorded = False
+            first_sentence_recorded = False
             try:
                 def on_chunk(token: str):
-                    nonlocal buf
+                    nonlocal buf, first_token_recorded, first_sentence_recorded
+                    if not first_token_recorded:
+                        log_diagnostic(
+                            "stage_completed",
+                            stage="model",
+                            milestone="first_token",
+                            duration_ms=int((monotonic() - stage_started) * 1000),
+                            trace_id=trace_id,
+                        )
+                        first_token_recorded = True
                     buf += token
                     reply_chunks.append(token)
                     emit("response_chunk", token)
@@ -146,11 +202,29 @@ class ProcessingPipeline:
                         s = sentence.strip()
                         if s:
                             sentence_q.put(s)
+                            if not first_sentence_recorded:
+                                log_diagnostic(
+                                    "stage_completed",
+                                    stage="model",
+                                    milestone="first_sentence_ready",
+                                    duration_ms=int((monotonic() - stage_started) * 1000),
+                                    trace_id=trace_id,
+                                )
+                                first_sentence_recorded = True
                     buf = parts[-1]
 
-                self.llm.generate(pending, on_chunk, cancelled)
+                self.llm.generate(pending, on_chunk, audio_cancelled)
                 if buf.strip():
                     sentence_q.put(buf.strip())
+                    if not first_sentence_recorded:
+                        log_diagnostic(
+                            "stage_completed",
+                            stage="model",
+                            milestone="first_sentence_ready",
+                            duration_ms=int((monotonic() - stage_started) * 1000),
+                            trace_id=trace_id,
+                        )
+                        first_sentence_recorded = True
             except Exception as exc:
                 llm_errors.append(exc)
             finally:
@@ -172,6 +246,11 @@ class ProcessingPipeline:
 
         audio_error = None
         playback_interrupted = False
+        tts_timing = {
+            "started": None,
+            "first_audio_ready": False,
+            "synthesis_duration": 0.0,
+        }
         while True:
             try:
                 item = sentence_q.get(timeout=0.1)
@@ -179,19 +258,33 @@ class ProcessingPipeline:
                 if cancelled():
                     llm_thread.join(timeout=0.25)
                     raise TurnCancelled()
+                if playback_stop_requested():
+                    playback_interrupted = True
+                    llm_thread.join(timeout=0.25)
+                    break
                 continue
             if item is _DONE:
                 if cancelled():
                     raise TurnCancelled()
+                if playback_stop_requested():
+                    playback_interrupted = True
                 break
             if audio_error:
                 continue
             stage_started = monotonic()
             try:
-                self.speak(item, emit, cancelled)
+                self.speak(
+                    item, emit, audio_cancelled,
+                    trace_id=trace_id, tts_timing=tts_timing
+                )
             except TurnCancelled:
-                llm_thread.join(timeout=2)
+                if cancelled():
+                    llm_thread.join(timeout=0.25)
+                    raise
+                if not playback_stop_requested():
+                    raise
                 playback_interrupted = True
+                llm_thread.join(timeout=2)
                 break
             except Exception as exc:
                 # A speaker failure must not discard text already generated by the LLM.
@@ -209,6 +302,14 @@ class ProcessingPipeline:
                 )
 
         llm_thread.join(timeout=5)
+        if tts_timing["started"] is not None:
+            log_diagnostic(
+                "stage_completed",
+                stage="tts",
+                milestone="synthesis_total",
+                duration_ms=int(tts_timing["synthesis_duration"] * 1000),
+                trace_id=trace_id,
+            )
 
         raw_reply = _strip_null_annotations("".join(reply_chunks).strip())
         try:
@@ -225,7 +326,7 @@ class ProcessingPipeline:
                 trace_id=trace_id,
             )
             raise RuntimeError("Ollama returned an empty response")
-        if cancelled() and not playback_interrupted:
+        if cancelled():
             raise TurnCancelled()
         is_complete = not llm_errors and not playback_interrupted
         if is_complete:

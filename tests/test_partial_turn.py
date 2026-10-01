@@ -49,7 +49,8 @@ def _run_interrupted_turn(scenario, context):
 
     pipeline = ProcessingPipeline(Transcriber(), LLM(), Synthesizer(), Player())
     return pipeline.run(
-        [0.1], context, lambda *_: None, lambda: cancel_after_playback[0]
+        [0.1], context, lambda *_: None, lambda: False,
+        playback_stop_requested=lambda: cancel_after_playback[0],
     )
 
 

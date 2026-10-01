@@ -33,14 +33,13 @@ microfone → VAD adaptativo → Whisper (small.en) → Ollama/Mistral
 
 ## Feedback de coaching
 
-O Dogen responde em inglês e, quando detecta erros, acrescenta ao final:
+O Dogen responde em inglês e, quando detecta um erro significativo, acrescenta uma correção breve em qualquer modo de conversa:
 
 ```
 [Correction: I go to school yesterday → I went to school yesterday]
-[Better phrasing: "I had class yesterday" sounds more natural]
 ```
 
-Correções e sugestões aparecem separadamente no painel **Fixes**.
+As correções aparecem como texto curto e somente leitura no painel **Fixes**. Fluency mode muda o estilo da conversa, mas não desativa as correções. O Dogen não inventa correções para inglês natural.
 
 ## Sessões
 

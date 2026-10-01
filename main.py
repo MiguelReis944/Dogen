@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PyQt5.QtWidgets import QApplication, QMessageBox
 
-from nlp.llm import ConversationContext
+from nlp.llm import ConversationContext, build_system_prompt
 from storage.db import Database
 from ui.dogen_logo import dogen_window_icon, set_windows_app_user_model_id
 from ui.main_window import MainWindow
@@ -59,7 +59,8 @@ def main():
                 session_id = str(uuid.uuid4())
             db.set_setting("session_date", today)
             db.set_setting("session_id", session_id)
-            context = ConversationContext(config.context_size, config.system_prompt)
+            # Prompt policy evolves with the app; do not revive a stale serialized prompt.
+            context = ConversationContext(config.context_size, build_system_prompt())
             for message in db.recent_context_messages(session_id, 2 * config.context_size):
                 context.add_message(message.role, message.content)
             window = MainWindow(config, db, context, session_id,
