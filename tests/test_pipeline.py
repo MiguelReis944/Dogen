@@ -1,6 +1,8 @@
+import threading
+from unittest.mock import MagicMock
+
 import numpy as np
 import pytest
-from unittest.mock import MagicMock
 
 from nlp.llm import ConversationContext, OllamaClient
 from nlp.feedback import CoachFeedback
@@ -107,6 +109,43 @@ def test_pipeline_respects_cancellation_after_tts():
         pipeline.run([0.1], context, lambda kind, value: events.append((kind, value)), lambda: cancel_after[0])
     # Context must NOT be updated on a cancelled turn
     assert context.messages == []
+
+
+def test_pipeline_cancellation_interrupts_wait_for_first_llm_chunk():
+    llm_started = threading.Event()
+    release_llm = threading.Event()
+    cancel = threading.Event()
+    finished = threading.Event()
+    outcome = []
+
+    class WaitingLLM:
+        def generate(self, messages, on_chunk, cancelled):
+            llm_started.set()
+            release_llm.wait(timeout=2)
+
+    pipeline = ProcessingPipeline(
+        FakeTranscriber(), WaitingLLM(), FakeSynthesizer(), FakePlayer()
+    )
+
+    def run_pipeline():
+        try:
+            pipeline.run([0.1], ConversationContext(), lambda *_: None, cancel.is_set)
+        except Exception as exc:
+            outcome.append(exc)
+        finally:
+            finished.set()
+
+    runner = threading.Thread(target=run_pipeline, daemon=True)
+    runner.start()
+    try:
+        assert llm_started.wait(timeout=1)
+        cancel.set()
+        assert finished.wait(timeout=0.4), "cancel waited for the stalled LLM stream"
+        assert len(outcome) == 1
+        assert isinstance(outcome[0], TurnCancelled)
+    finally:
+        release_llm.set()
+        runner.join(timeout=1)
 
 
 def test_pipeline_confirm_fn_replaces_transcript_before_llm():

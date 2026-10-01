@@ -54,6 +54,7 @@ These are incremental quality improvements, not a rewrite. Apply them alongside 
 
 - [ ] Add tests asserting that a completed turn shown in the conversation is present in `Database.session_messages(session_id)` and in an export made after the completion signal.
 - [ ] Add a separate interrupted-stream test asserting that the partial assistant text remains visibly marked and exportable but is not added to future LLM context or counted as completed.
+- [x] Make cancellation responsive while waiting for the first sentence from a stalled LLM stream; add a regression test that proves cancellation does not wait for a queue sentinel.
 - [ ] Trace the visible two-turn/export mismatch from the UI signal through the SQLite write and the export query. Fix the first boundary where a displayed, completed message is missing; do not add a second history store.
 - [ ] For an empty current session, show a clear “nothing to export” message and do not silently create a zero-byte export. Keep prior sessions stored and exportable.
 - [ ] Verify that `New Session` clears only the active context and UI. Do not carry facts into a new session. If the earlier phrase was lost inside the same session, fix that persistence/context defect; if it crossed a deliberate session reset, report that current behavior is by design and ask before adding long-term memory.

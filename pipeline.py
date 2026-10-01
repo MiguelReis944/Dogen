@@ -139,8 +139,16 @@ class ProcessingPipeline:
 
         audio_error = None
         while True:
-            item = sentence_q.get()
+            try:
+                item = sentence_q.get(timeout=0.1)
+            except queue.Empty:
+                if cancelled():
+                    llm_thread.join(timeout=0.25)
+                    raise TurnCancelled()
+                continue
             if item is _DONE:
+                if cancelled():
+                    raise TurnCancelled()
                 break
             if audio_error:
                 continue
