@@ -1,6 +1,7 @@
 """Check frozen Coqui TTS config sources and speech-tool data resources."""
 
 import argparse
+import runpy
 from importlib.util import find_spec
 from pathlib import Path
 
@@ -33,13 +34,20 @@ def verify_tts_torchscript_sources(bundle_root, source_tts_root):
 
     if not source_module.is_file():
         raise RuntimeError(
-            f"Coqui TorchScript source file not found in build environment: {source_module}"
+            "Coqui TorchScript source file not found in build environment: "
+            f"{source_module}"
         )
     if not bundled_module.is_file():
         raise RuntimeError(
             "Dogen bundle is missing the Coqui TorchScript source file: "
             "TTS/vocoder/layers/wavegrad.py"
         )
+    try:
+        runpy.run_path(str(bundled_module))
+    except Exception as exc:
+        raise RuntimeError(
+            "The Coqui TorchScript source file could not be loaded by PyTorch."
+        ) from exc
     return 1
 
 

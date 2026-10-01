@@ -110,7 +110,10 @@ def test_capture_failure_is_diagnosed_as_capture_not_startup(monkeypatch):
         worker.start()
         assert worker.wait(2000)
 
-    assert failures == ["microphone disconnected"]
+    assert len(failures) == 1
+    assert failures[0].startswith(
+        "Microphone recording failed: microphone disconnected."
+    )
     assert any(
         call.args[0] == "turn_failed" and call.kwargs.get("stage") == "capture"
         for call in diagnostic.call_args_list
@@ -119,3 +122,132 @@ def test_capture_failure_is_diagnosed_as_capture_not_startup(monkeypatch):
         call.args[0] == "turn_failed" and call.kwargs.get("stage") == "startup"
         for call in diagnostic.call_args_list
     )
+
+
+def test_tts_initialization_failure_explains_setup_and_retry(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+
+    class FakeTranscriber:
+        def __init__(self, *_args):
+            pass
+
+    class BrokenSynthesizer:
+        def __init__(self, *_args):
+            raise OSError("could not get source code")
+
+    monkeypatch.setattr("ui.conversation_worker.Transcriber", FakeTranscriber)
+    monkeypatch.setattr("ui.conversation_worker.Synthesizer", BrokenSynthesizer)
+    worker = ConversationWorker(AppConfig(), object(), "mistral")
+    failures = []
+    worker.error.connect(failures.append, Qt.DirectConnection)
+
+    worker.start()
+    assert worker.wait(2000)
+
+    assert failures == [
+        "Could not load the local voice: could not get source code. "
+        "Open File → Setup guide to install or repair the speech models, "
+        "then choose Retry loading."
+    ]
+
+
+def test_whisper_initialization_failure_explains_setup_and_retry(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+
+    class BrokenTranscriber:
+        def __init__(self, *_args):
+            raise FileNotFoundError("Whisper model 'small.en' is not cached")
+
+    monkeypatch.setattr("ui.conversation_worker.Transcriber", BrokenTranscriber)
+    worker = ConversationWorker(AppConfig(), object(), "mistral")
+    failures = []
+    worker.error.connect(failures.append, Qt.DirectConnection)
+
+    worker.start()
+    assert worker.wait(2000)
+
+    assert failures == [
+        "Could not load speech recognition: Whisper model 'small.en' is not cached. "
+        "Open File → Setup guide to install or repair the speech models, "
+        "then choose Retry loading."
+    ]
+
+
+def test_microphone_initialization_failure_explains_device_recovery(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+
+    class FakeTranscriber:
+        def __init__(self, *_args):
+            pass
+
+    class FakeSynthesizer:
+        def __init__(self, *_args):
+            pass
+
+    class BrokenRecorder:
+        def __init__(self, *_args, **_kwargs):
+            raise OSError("No input device")
+
+    monkeypatch.setattr("ui.conversation_worker.Transcriber", FakeTranscriber)
+    monkeypatch.setattr("ui.conversation_worker.Synthesizer", FakeSynthesizer)
+    monkeypatch.setattr("ui.conversation_worker.Recorder", BrokenRecorder)
+    worker = ConversationWorker(AppConfig(), object(), "mistral")
+    failures = []
+    worker.error.connect(failures.append, Qt.DirectConnection)
+
+    worker.start()
+    assert worker.wait(2000)
+
+    assert failures == [
+        "Could not prepare the microphone: No input device. "
+        "Check Windows microphone permissions and the selected input device, "
+        "then choose Retry loading."
+    ]
+
+
+def test_turn_exception_explains_that_another_recording_can_be_tried(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    recording = SimpleNamespace(
+        samples=np.array([0.1, 0.2], dtype=np.float32),
+        stop_reason="ptt_release",
+        duration_sec=0.25,
+    )
+
+    class FakeRecorder:
+        def __init__(self, *_args):
+            pass
+
+        def record(self, *_args, **_kwargs):
+            return recording
+
+    class BrokenPipeline:
+        llm = SimpleNamespace(model="mistral")
+
+        def run(self, *_args, **_kwargs):
+            raise RuntimeError("temporary transcription failure")
+
+    monkeypatch.setattr("ui.conversation_worker.Recorder", FakeRecorder)
+    worker = ConversationWorker(
+        AppConfig(input_mode="ptt"), object(), "mistral", pipeline=BrokenPipeline(),
+        active_model="mistral",
+    )
+    worker._warm_up_llm = lambda _pipeline: True
+    failures = []
+    wait_count = []
+    worker.error.connect(failures.append, Qt.DirectConnection)
+
+    def advance_or_stop():
+        wait_count.append(True)
+        if len(wait_count) == 1:
+            worker.begin_ptt()
+        else:
+            worker.requestInterruption()
+
+    worker.waiting_for_ptt.connect(advance_or_stop, Qt.DirectConnection)
+    worker.start()
+    assert worker.wait(2000)
+
+    assert failures == [
+        "Turn failed: temporary transcription failure. "
+        "The microphone is ready for another recording."
+    ]

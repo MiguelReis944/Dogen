@@ -447,6 +447,10 @@ class MainWindow(QMainWindow):
             self.worker.end_ptt()
             self.record_button.setEnabled(False)
             self.record_button.setText("Finishing…")
+        elif self._last_error and not (self.worker and self.worker.isRunning()):
+            self._last_error = None
+            self._response_notice = None
+            self.start()
         elif (
             self._speech_ready and self._current_model
             and self._loaded_model != self._current_model
@@ -608,8 +612,9 @@ class MainWindow(QMainWindow):
             self.record_button.setText("Loading model…")
             self.record_button.setEnabled(False)
         elif self._last_error:
-            self.record_button.setText("Unavailable")
-            self.record_button.setEnabled(False)
+            can_retry = not (self.worker and self.worker.isRunning())
+            self.record_button.setText("Retry loading" if can_retry else "Recovering…")
+            self.record_button.setEnabled(can_retry and not self._configuration_locked)
         elif not self._speech_ready:
             self.record_button.setText("Loading speech models…")
             self.record_button.setEnabled(False)
@@ -963,6 +968,13 @@ class MainWindow(QMainWindow):
         self._set_status(f"Captured {duration_sec:.1f}s · {stop_reason}")
 
     def _on_waiting_for_ptt(self):
+        if self._last_error:
+            self._response_notice = (
+                self._last_error
+                if self._last_error == "Didn't catch that. Please try again."
+                else f"Previous turn failed: {self._last_error}"
+            )
+            self._last_error = None
         self.loading_menu_action.setVisible(False)
         self._model_load_pending = False
         self._worker_waiting_for_ptt = True
@@ -1141,7 +1153,7 @@ class MainWindow(QMainWindow):
             self.record_button.setText("Start recording")
         else:
             self.record_button.setEnabled(False)
-            self.record_button.setText("Unavailable")
+            self.record_button.setText("Retry loading")
         self._set_configuration_enabled(True)
         self.stop_audio_button.setEnabled(False)
         self.replay_response_button.setEnabled(bool(self._last_assistant_text and self._pipeline))
@@ -1223,8 +1235,7 @@ class MainWindow(QMainWindow):
         self.replay_response_button.setEnabled(bool(self._last_assistant_text and pipeline))
         if self._last_error:
             self._set_capture_state("error", self._last_error)
-            self.record_button.setEnabled(False)
-            self.record_button.setText("Unavailable")
+            self._update_model_controls()
         else:
             self._set_capture_state("ready", self._replay_error or self._idle_instruction())
 

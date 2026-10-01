@@ -726,15 +726,72 @@ def test_failed_turn_removes_provisional_transcript(tmp_path):
         window.close()
 
 
-def test_worker_failure_remains_visible_after_finish(tmp_path):
+def test_worker_startup_failure_can_be_retried_without_restarting_app(tmp_path):
     app = QApplication.instance() or QApplication([])
     with Database(tmp_path / "conversation.db") as db:
         window = _make_window(db)
+        window.worker = SimpleNamespace(
+            isRunning=lambda: False,
+            built_pipeline=None,
+        )
         window._on_error("Coqui model is not cached")
         window._on_finished()
+
         assert window.status.text() == "Coqui model is not cached"
-        assert window.record_button.text() == "Unavailable"
-        assert not window.record_button.isEnabled()
+        assert window.record_button.text() == "Retry loading"
+        assert window.record_button.isEnabled()
+
+        with patch.object(window, "start") as restart_worker:
+            window.record_button.click()
+
+        restart_worker.assert_called_once()
+        window.close()
+
+
+def test_turn_failure_does_not_disable_the_next_recording(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        window.worker = SimpleNamespace(
+            isRunning=lambda: True,
+            built_pipeline=object(),
+        )
+        window._speech_ready = True
+        window._models_ready = True
+        window._model_names = ["mistral"]
+        window._current_model = "mistral"
+        window._loaded_model = "mistral"
+
+        window._on_error("Whisper could not process this recording")
+        window._on_waiting_for_ptt()
+
+        assert window._last_error is None
+        assert window.record_button.text() == "Start recording"
+        assert window.record_button.isEnabled()
+        assert window.status.text().startswith("Previous turn failed:")
+        window.close()
+
+
+def test_empty_recording_notice_is_not_described_as_a_failed_turn(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db)
+        window.worker = SimpleNamespace(
+            isRunning=lambda: True,
+            built_pipeline=object(),
+        )
+        window._speech_ready = True
+        window._models_ready = True
+        window._model_names = ["mistral"]
+        window._current_model = "mistral"
+        window._loaded_model = "mistral"
+
+        window._on_error("Didn't catch that. Please try again.")
+        window._on_waiting_for_ptt()
+
+        assert window.status.text() == "Didn't catch that. Please try again."
+        assert window.record_button.text() == "Start recording"
+        assert window.record_button.isEnabled()
         window.close()
 
 

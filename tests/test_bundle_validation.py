@@ -1,15 +1,15 @@
-from pathlib import Path
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+import scripts.verify_bundle as verify_bundle
 from scripts.verify_bundle import (
     verify_ko_speech_data_files,
     verify_tts_config_sources,
     verify_tts_torchscript_sources,
 )
-import scripts.verify_bundle as verify_bundle
 from scripts.verify_ko_speech_runtime import verify_ko_speech_runtime
 
 
@@ -142,7 +142,7 @@ def test_bundle_validation_accepts_bundled_torchscript_module_source(tmp_path):
     source_module = source_tts_root / "vocoder" / "layers" / "wavegrad.py"
     source_module.parent.mkdir(parents=True)
     source_module.write_text(
-        "@torch.jit.script\ndef scripted_helper(x): return x\n",
+        "import torch\n@torch.jit.script\ndef scripted_helper(x): return x\n",
         encoding="utf-8",
     )
 
@@ -156,6 +156,25 @@ def test_bundle_validation_accepts_bundled_torchscript_module_source(tmp_path):
     assert verify_tts_torchscript_sources(
         bundled_module.parents[4], source_tts_root
     ) == 1
+
+
+def test_bundle_validation_rejects_torchscript_source_that_cannot_be_loaded(tmp_path):
+    source_tts_root = tmp_path / "site-packages" / "TTS"
+    source_module = source_tts_root / "vocoder" / "layers" / "wavegrad.py"
+    source_module.parent.mkdir(parents=True)
+    source_module.write_text("import torch\n", encoding="utf-8")
+
+    bundled_module = (
+        tmp_path / "dist" / "Dogen" / "_internal" / "TTS"
+        / "vocoder" / "layers" / "wavegrad.py"
+    )
+    bundled_module.parent.mkdir(parents=True)
+    bundled_module.write_text("this is not valid python !", encoding="utf-8")
+
+    with pytest.raises(
+        RuntimeError, match="TorchScript source file could not be loaded"
+    ):
+        verify_tts_torchscript_sources(bundled_module.parents[4], source_tts_root)
 
 
 def test_ko_speech_runtime_probe_reads_namespace_resources():

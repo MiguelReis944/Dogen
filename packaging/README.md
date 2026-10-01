@@ -13,6 +13,21 @@ weights can be downloaded during setup and live under `%LOCALAPPDATA%\Dogen\mode
 conversations, and local diagnostics live under `%LOCALAPPDATA%\Dogen`; uninstalling
 the app leaves that user data intact.
 
+## Troubleshooting
+
+- If speech recognition or the local voice cannot load, follow the status message. Use
+  **File → Setup guide…** to prepare or repair speech models, then select **Retry loading**.
+- If microphone validation blocks launch before the main window appears, reconnect the
+  microphone or correct Windows privacy/device settings, then restart Dogen. If recording
+  fails after launch, follow the status message and select **Retry loading** after fixing it.
+- If an individual recording or turn fails, Dogen keeps the error visible, returns to the
+  recording state when possible, and allows another attempt without restarting.
+- Ollama remains a separate local service. Start Ollama, install the desired conversation
+  model there, then use **File → Model → Refresh model list** and **Load selected model**.
+
+Hardware, Windows permissions, local model files, and Ollama availability vary between
+computers; Dogen reports these environment failures instead of silently ignoring them.
+
 ## Build on Windows
 
 Use 64-bit Python 3.10 and install Inno Setup 7 (Inno Setup 6 also works). From the project root, run:

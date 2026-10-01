@@ -252,7 +252,11 @@ class ConversationWorker(QThread):
                         "turn_failed", stage="transcribe",
                         error_type=type(exc).__name__,
                     )
-                    self.error.emit(str(exc))
+                    self.error.emit(
+                        f"Could not load speech recognition: {exc}. "
+                        "Open File → Setup guide to install or repair the speech models, "
+                        "then choose Retry loading."
+                    )
                     return
                 if self._cancelled():
                     return
@@ -264,7 +268,11 @@ class ConversationWorker(QThread):
                     log_diagnostic(
                         "turn_failed", stage="tts", error_type=type(exc).__name__
                     )
-                    self.error.emit(str(exc))
+                    self.error.emit(
+                        f"Could not load the local voice: {exc}. "
+                        "Open File → Setup guide to install or repair the speech models, "
+                        "then choose Retry loading."
+                    )
                     return
                 if self._cancelled():
                     return
@@ -287,7 +295,11 @@ class ConversationWorker(QThread):
                 log_diagnostic(
                     "turn_failed", stage="capture", error_type=type(exc).__name__
                 )
-                self.error.emit(str(exc))
+                self.error.emit(
+                    f"Could not prepare the microphone: {exc}. "
+                    "Check Windows microphone permissions and the selected input device, "
+                    "then choose Retry loading."
+                )
                 return
 
             self.speech_ready.emit()
@@ -329,7 +341,11 @@ class ConversationWorker(QThread):
                     log_diagnostic(
                         "turn_failed", stage="capture", error_type=type(exc).__name__
                     )
-                    self.error.emit(str(exc))
+                    self.error.emit(
+                        f"Microphone recording failed: {exc}. "
+                        "Check Windows microphone permissions and the selected input device, "
+                        "then choose Retry loading."
+                    )
                     return
                 self.recording_finished.emit(recording.stop_reason, recording.duration_sec)
 
@@ -363,7 +379,10 @@ class ConversationWorker(QThread):
                         continue
                     return
                 except Exception as exc:
-                    self.error.emit(str(exc))
+                    self.error.emit(
+                        f"Turn failed: {exc}. "
+                        "The microphone is ready for another recording."
+                    )
                 self._playback_active = False
 
                 self.ready.emit()
@@ -372,4 +391,6 @@ class ConversationWorker(QThread):
             log_diagnostic(
                 "turn_failed", stage="startup", error_type=type(exc).__name__
             )
-            self.error.emit(str(exc))
+            self.error.emit(
+                f"Startup failed: {exc}. Check File → Setup guide, then choose Retry loading."
+            )
