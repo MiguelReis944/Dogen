@@ -20,7 +20,7 @@ O modo de gravação é controlado por cliques: um clique começa e outro termin
 
 A conversa ocupa o painel principal. **Fixes** mostra correções e frases alternativas sem poluir o diálogo, e **Status** mostra o estágio atual. Ações secundárias, seleção de cenário e seleção de modelo ficam no menu **File**. A narração usa somente a voz feminina local.
 
-Em **Settings**, ative **Review transcript before sending** para corrigir o texto reconhecido antes de enviá-lo ao coach; a revisão é enviada automaticamente depois de cinco segundos se não houver edição.
+Em **Settings**, ative **Review transcript before sending** para corrigir o texto reconhecido antes de enviá-lo ao coach; a revisão é enviada automaticamente depois de 15 segundos se você não confirmar antes.
 
 Depois de uma resposta completa, use **Replay response** para ouvi-la novamente ou **Stop audio** para interromper a fala. Repetir uma resposta não cria outro turno, não chama o Ollama e não altera as estatísticas.
 

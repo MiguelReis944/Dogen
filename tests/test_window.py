@@ -603,6 +603,57 @@ def test_recording_exit_clears_face_and_ignores_late_mic_volume(tmp_path):
         window.close()
 
 
+def test_transcript_review_waits_fifteen_seconds_and_retry_cancels(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db, AppConfig(review_transcript=True))
+        worker = SimpleNamespace(
+            isRunning=lambda: True,
+            confirm_transcript=MagicMock(),
+            cancel_transcript=MagicMock(),
+        )
+        window.worker = worker
+
+        window._on_transcript_review("I will go tomorrow")
+        assert window._review_seconds_left == 15
+        assert "15s" in window._review_countdown.text()
+        assert "15s" in window.status.text()
+
+        for _ in range(14):
+            window._review_tick()
+        assert window._review_seconds_left == 1
+        assert not window._review_bar.isHidden()
+        worker.confirm_transcript.assert_not_called()
+
+        window._review_tick()
+        worker.confirm_transcript.assert_called_once_with("I will go tomorrow")
+        assert window._review_bar.isHidden()
+
+        worker.confirm_transcript.reset_mock()
+        window._on_transcript_review("Try again")
+        window._on_cancel_transcript()
+        assert not window._review_timer.isActive()
+        worker.cancel_transcript.assert_called_once()
+        worker.confirm_transcript.assert_not_called()
+        window.close()
+
+
+def test_transcript_review_enter_sends_immediately(tmp_path):
+    app = QApplication.instance() or QApplication([])
+    with Database(tmp_path / "conversation.db") as db:
+        window = _make_window(db, AppConfig(review_transcript=True))
+        confirm = MagicMock()
+        window.worker = SimpleNamespace(isRunning=lambda: True, confirm_transcript=confirm)
+
+        window._on_transcript_review("Updated transcript")
+        window._review_edit.returnPressed.emit()
+
+        confirm.assert_called_once_with("Updated transcript")
+        assert not window._review_timer.isActive()
+        assert window._review_bar.isHidden()
+        window.close()
+
+
 def test_next_worker_reuses_completed_pipeline(tmp_path):
     app = QApplication.instance() or QApplication([])
     with Database(tmp_path / "conversation.db") as db:

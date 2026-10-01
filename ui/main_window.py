@@ -39,6 +39,7 @@ _CORRECTION_RE = re.compile(r'(\[[A-Z][^:\[\]\n]*:.*?\])', re.DOTALL)
 
 # How many pixels of RMS maps to 100% on the level meter
 _VOL_SCALE = 600
+_REVIEW_COUNTDOWN_SECONDS = 15
 
 
 def _utc_bounds_for_local_day(local_day: date) -> tuple[str, str]:
@@ -1009,15 +1010,17 @@ class MainWindow(QMainWindow):
             self._set_status(self._response_notice or self._idle_instruction())
 
     def _on_transcript_review(self, text: str):
-        """Show the editable review bar with a 5-second auto-confirm countdown."""
+        """Show the editable review bar with a 15-second auto-confirm countdown."""
         self._review_edit.setText(text)
-        self._review_seconds_left = 5
+        self._review_seconds_left = _REVIEW_COUNTDOWN_SECONDS
         self._review_countdown.setText(f"{self._review_seconds_left}s")
         self._review_bar.setVisible(True)
         self._review_edit.setFocus()
         self._review_edit.selectAll()
         self._review_timer.start()
-        self._set_status("Edit the transcript, then send or retry · sending in 5s")
+        self._set_status(
+            f"Edit the transcript, then send or retry · sending in {_REVIEW_COUNTDOWN_SECONDS}s"
+        )
 
     def _review_tick(self):
         self._review_seconds_left -= 1

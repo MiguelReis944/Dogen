@@ -27,5 +27,5 @@ serviço remoto necessário para o fluxo de produto.
 ## Decisões técnicas vigentes
 
 Gravação usa cliques para começar e terminar; revisão de transcrição tem timeout de
-cinco segundos; a voz TTS exposta é a feminina local. A direção futura do domínio está
+15 segundos; a voz TTS exposta é a feminina local. A direção futura do domínio está
 em `docs/design/2026-09-27-learning-system-design.md`, não substitui a implementação.
