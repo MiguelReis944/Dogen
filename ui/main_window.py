@@ -19,6 +19,7 @@ from ui.pet_widget import PetWidget
 from ui.progress_dialog import ProgressDialog
 from ui.session_summary_dialog import SessionSummaryDialog
 from ui.settings_dialog import SettingsDialog
+from ui.setup_wizard import SetupWizard
 from ui.vocab_dialog import VocabDialog
 from ui.dogen_logo import apply_dogen_window_icon, apply_hud_title_bar
 from ui.conversation_worker import ConversationWorker
@@ -29,6 +30,7 @@ from utils.diagnostics import (
     local_diagnostics_path,
     log_diagnostic,
 )
+from utils.config import save_config
 
 FEMALE_VOICE_MODEL = "tts_models/en/ljspeech/tacotron2-DDC"
 
@@ -406,6 +408,13 @@ class MainWindow(QMainWindow):
         self.settings_action.setShortcut(QKeySequence("Ctrl+,"))
         self.settings_action.triggered.connect(self._open_settings)
         file_menu.addAction(self.settings_action)
+
+        self.setup_guide_action = QAction("Setup guide…", self)
+        self.setup_guide_action.setToolTip(
+            "Check speech models and Ollama, or return to first-run setup."
+        )
+        self.setup_guide_action.triggered.connect(self._open_setup_guide)
+        file_menu.addAction(self.setup_guide_action)
 
         export_action = QAction("Export session", self)
         export_action.setShortcut(QKeySequence("Ctrl+E"))
@@ -1273,6 +1282,29 @@ class MainWindow(QMainWindow):
 
     def _show_progress(self):
         ProgressDialog(ProgressService(self.db), parent=self).exec_()
+
+    def _open_setup_guide(self):
+        if self._capture_state not in (CaptureState.READY, CaptureState.ERROR):
+            QMessageBox.information(
+                self,
+                "Finish the current turn first",
+                "Open the setup guide after recording and response playback are finished.",
+            )
+            return
+        from pathlib import Path
+
+        settings_path = self.settings_path or Path("settings.json")
+        dialog = SetupWizard(self.config, self)
+        if not dialog.exec_():
+            return
+        save_config(self.config, settings_path)
+        if self.config.ollama_model:
+            self.db.set_setting("last_model", self.config.ollama_model)
+        if dialog.hide_next_time.isChecked():
+            marker_path = settings_path.with_name("first_run_setup_complete")
+            marker_path.parent.mkdir(parents=True, exist_ok=True)
+            marker_path.touch()
+        self._fetch_models()
 
     # ── session management ─────────────────────────────────────────────────────
 

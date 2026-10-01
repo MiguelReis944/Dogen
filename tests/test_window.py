@@ -16,8 +16,10 @@ from storage.db import Database
 from storage.models import TurnMetrics
 from storage.progress import ProgressService, ProgressStats
 from ui.main_window import ConversationWorker, MainWindow, ModelFetcher
+from ui import main_window as main_window_module
 from ui.session_summary_dialog import SessionSummaryDialog
 from ui.progress_dialog import ProgressDialog
+from ui.lifecycle import CaptureState
 from ui.settings_dialog import SettingsDialog
 from utils.config import AppConfig, load_config
 
@@ -69,6 +71,61 @@ def test_closing_before_first_event_cancels_automatic_start(tmp_path):
             app.processEvents()
 
         assert start.call_count == 0
+
+
+def test_setup_guide_is_reopenable_and_persists_model_preference(tmp_path, monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    config = AppConfig(ollama_model="mistral")
+    dialog = SimpleNamespace(
+        hide_next_time=SimpleNamespace(isChecked=lambda: True),
+        exec_=lambda: 1,
+    )
+
+    def show_setup(received_config, parent):
+        assert received_config is config
+        received_config.ollama_model = "llama3.2:3b"
+        return dialog
+
+    monkeypatch.setattr(main_window_module, "SetupWizard", show_setup)
+    settings_path = tmp_path / "settings.json"
+    with Database(tmp_path / "conversation.db") as db:
+        db.set_setting("last_model", "mistral")
+        with patch.object(MainWindow, "_fetch_models", return_value=None) as fetch:
+            window = MainWindow(
+                config, db, ConversationContext(), "session",
+                settings_path=settings_path, auto_start=False, start_maximized=False,
+            )
+            assert window.setup_guide_action.text() == "Setup guide…"
+            window._open_setup_guide()
+            window._on_models_ready(["mistral", "llama3.2:3b"])
+
+        assert load_config(settings_path).ollama_model == "llama3.2:3b"
+        assert db.get_setting("last_model") == "llama3.2:3b"
+        assert window._current_model == "llama3.2:3b"
+        assert (tmp_path / "first_run_setup_complete").is_file()
+        assert fetch.call_count == 2  # initial model discovery plus refresh after setup
+        window.close()
+
+
+def test_setup_guide_can_open_after_startup_error(tmp_path, monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    opened = []
+    dialog = SimpleNamespace(exec_=lambda: opened.append(True) or 0)
+    monkeypatch.setattr(main_window_module, "SetupWizard", lambda *args: dialog)
+    monkeypatch.setattr(QMessageBox, "information", lambda *args: None)
+
+    with Database(tmp_path / "conversation.db") as db:
+        with patch.object(MainWindow, "_fetch_models", return_value=None):
+            window = MainWindow(
+                AppConfig(), db, ConversationContext(), "session",
+                settings_path=tmp_path / "settings.json",
+                auto_start=False, start_maximized=False,
+            )
+            window._set_capture_state(CaptureState.ERROR, "Speech model failed to load")
+            window._open_setup_guide()
+            window.close()
+
+    assert opened == [True]
 
 
 def test_ollama_warmup_failure_keeps_worker_unavailable():

@@ -1,4 +1,5 @@
 import builtins
+from hashlib import sha256
 import os
 from pathlib import Path
 import sys
@@ -67,6 +68,38 @@ def test_tts_home_defaults_to_windows_local_app_data(monkeypatch, tmp_path):
     preflight.configure_tts_home()
 
     assert os.environ["TTS_HOME"] == str(tmp_path)
+
+
+def test_whisper_cache_check_rejects_a_corrupt_model(monkeypatch, tmp_path):
+    model_data = b"valid model data"
+    digest = sha256(model_data).hexdigest()
+    whisper_module = ModuleType("whisper")
+    whisper_module._MODELS = {
+        "small.en": f"https://models.example/{digest}/small.pt",
+    }
+    monkeypatch.setitem(sys.modules, "whisper", whisper_module)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    cache = tmp_path / "whisper"
+    cache.mkdir()
+    (cache / "small.pt").write_bytes(b"truncated")
+
+    assert preflight.check_whisper("small.en") is False
+
+
+def test_whisper_cache_check_accepts_a_valid_model(monkeypatch, tmp_path):
+    model_data = b"valid model data"
+    digest = sha256(model_data).hexdigest()
+    whisper_module = ModuleType("whisper")
+    whisper_module._MODELS = {
+        "small.en": f"https://models.example/{digest}/small.pt",
+    }
+    monkeypatch.setitem(sys.modules, "whisper", whisper_module)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    cache = tmp_path / "whisper"
+    cache.mkdir()
+    (cache / "small.pt").write_bytes(model_data)
+
+    assert preflight.check_whisper("small.en") is True
 
 
 def test_start_validates_runtime_before_trusting_setup_marker():

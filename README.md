@@ -4,11 +4,17 @@ Coach de inglês conversacional, 100% offline. Captura a sua voz, transcreve com
 
 ## Início rápido
 
-Execute `start.bat`. Na primeira vez, cria o virtualenv, instala as dependências e baixa os modelos (Whisper, Coqui TTS, Ollama/Mistral). Nas vezes seguintes, verifica o cache e abre direto.
+Para desenvolvimento local, execute `start.bat`. Na primeira vez, cria o virtualenv, instala as dependências e verifica os modelos de fala. Nas vezes seguintes, verifica o cache e abre direto.
 
 ```
 start.bat
 ```
+
+Para testar sem Python ou `.bat`, use o instalador Windows em `packaging/README.md`.
+Ele instala o Dogen e abre um guia inicial para preparar os modelos de fala e
+conectar um modelo local do Ollama. O Ollama e os pesos dos modelos continuam
+separados; conversas e configurações ficam em `%LOCALAPPDATA%\Dogen` e não são
+apagadas ao desinstalar o aplicativo.
 
 Para setup manual, veja [docs/SETUP.md](docs/SETUP.md).
 

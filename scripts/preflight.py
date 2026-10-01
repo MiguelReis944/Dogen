@@ -1,8 +1,10 @@
 """Pre-flight checks: verify or download Whisper and TTS models."""
 
 import importlib.util
+from hashlib import sha256
 import os
 import sys
+from pathlib import Path
 
 
 REQUIRED_RUNTIME_MODULES = ("whisper", "TTS", "noisereduce", "torch", "torchaudio")
@@ -48,16 +50,30 @@ def patch_transformers_compatibility():
 
 
 def check_whisper(model_name):
-    import os
-    import pathlib
     import whisper
 
     models = whisper._MODELS
     if model_name not in models:
         return True  # custom path, skip check
-    filename = models[model_name].split("/")[-1]
-    cache = pathlib.Path(os.environ.get("XDG_CACHE_HOME", pathlib.Path.home() / ".cache")) / "whisper"
-    return (cache / filename).is_file()
+    model_url = models[model_name]
+    filename = model_url.split("/")[-1]
+    cache = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "whisper"
+    model_path = cache / filename
+    if not model_path.is_file():
+        return False
+
+    expected_digest = model_url.split("/")[-2]
+    if len(expected_digest) != 64:
+        return True
+
+    digest = sha256()
+    try:
+        with model_path.open("rb") as model_file:
+            for chunk in iter(lambda: model_file.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        return False
+    return digest.hexdigest() == expected_digest
 
 
 def download_whisper(model_name):

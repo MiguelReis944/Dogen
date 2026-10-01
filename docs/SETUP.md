@@ -1,5 +1,20 @@
 # Preparar o Dogen para uso local
 
+## Instalador Windows
+
+Quem for testar o aplicativo não precisa instalar Python nem iniciar `start.bat`:
+instale `Dogen-Setup.exe` e siga o guia que aparece na primeira abertura. Ele verifica
+os modelos locais de fala, permite baixá-los e ajuda a escolher um modelo já instalado
+no Ollama. O guia nunca carrega o LLM na VRAM automaticamente. Veja
+[`packaging/README.md`](../packaging/README.md) para gerar o instalador.
+
+O Ollama é instalado separadamente. Os pesos de Whisper, TTS e Ollama não fazem parte
+do instalador: o guia pode baixar os dois primeiros quando o usuário escolhe prepará-los
+e usa o Ollama para o modelo de conversa escolhido. Os dados do usuário ficam em
+`%LOCALAPPDATA%\Dogen` e permanecem após desinstalar o programa.
+
+## Execução a partir do código-fonte
+
 1. Instale Python 3.10, Ollama e um microfone. Crie um ambiente virtual:
 
    ```powershell

@@ -3,29 +3,50 @@
 import sys
 import uuid
 from datetime import date
-from pathlib import Path
 
-from PyQt5.QtWidgets import QApplication, QMessageBox
+from PyQt5.QtWidgets import QApplication, QDialog, QMessageBox
 
 from nlp.llm import ConversationContext, build_system_prompt
 from storage.db import Database
 from ui.dogen_logo import dogen_window_icon, set_windows_app_user_model_id
 from ui.main_window import MainWindow
-from utils.config import load_config
+from ui.setup_wizard import SetupWizard, should_show_setup_wizard
+from utils.config import load_config, save_config
 from utils.diagnostics import (
     configure_local_diagnostics,
     local_diagnostics_path,
     log_diagnostic,
 )
+from utils.paths import (
+    app_data_root,
+    app_resource_root,
+    configure_model_cache_dirs,
+    conversations_path,
+    is_frozen,
+    settings_path,
+    setup_marker_path,
+)
 
 
 def main():
+    configure_model_cache_dirs()
     set_windows_app_user_model_id()
     app = QApplication(sys.argv)
     app.setApplicationName("Dogen")
     app.setWindowIcon(dogen_window_icon())
-    root = Path(__file__).resolve().parent
-    config = load_config(root / "settings.json")
+    root = app_resource_root()
+    data_root = app_data_root()
+    data_root.mkdir(parents=True, exist_ok=True)
+    user_settings_path = settings_path()
+    config = load_config(user_settings_path)
+    marker_path = setup_marker_path()
+    if should_show_setup_wizard(is_frozen(), marker_path):
+        wizard = SetupWizard(config)
+        if wizard.exec_() != QDialog.Accepted:
+            return 0
+        save_config(config, user_settings_path)
+        if wizard.hide_next_time.isChecked():
+            marker_path.touch()
     if config.diagnostics_enabled:
         diagnostics_path = local_diagnostics_path()
         if diagnostics_path is None or not configure_local_diagnostics(diagnostics_path):
@@ -47,7 +68,7 @@ def main():
         log_diagnostic("audio_error", stage="capture", error_type=type(exc).__name__)
         return 1
     try:
-        with Database(root / "conversations.db") as db:
+        with Database(conversations_path()) as db:
             today = str(date.today())
             if db.get_setting("session_date") == today:
                 session_id = (
@@ -64,7 +85,7 @@ def main():
             for message in db.recent_context_messages(session_id, 2 * config.context_size):
                 context.add_message(message.role, message.content)
             window = MainWindow(config, db, context, session_id,
-                                settings_path=root / "settings.json")
+                                settings_path=user_settings_path)
             window.show()
             exit_code = app.exec_()
             log_diagnostic("app_shutdown", state="shutdown")
