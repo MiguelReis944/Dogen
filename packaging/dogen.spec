@@ -59,6 +59,8 @@ a = Analysis(
     runtime_hooks=[os.path.join(PROJECT_ROOT, "packaging", "runtime_hook.py")],
     excludes=["pytest", "IPython", "notebook", "jupyter"],
     noarchive=False,
+    # Coqui scans this package with os.listdir(__file__'s directory) at import.
+    module_collection_mode={"TTS.vocoder.configs": "pyz+py"},
     optimize=0,
 )
 pyz = PYZ(a.pure)

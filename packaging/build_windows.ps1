@@ -25,6 +25,11 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "PyInstaller could not create the Dogen application folder." }
     }
 
+    & $python "scripts\verify_bundle.py" "build\dist\Dogen"
+    if ($LASTEXITCODE -ne 0) {
+        throw "The Dogen app bundle is missing runtime-scanned Coqui TTS config files."
+    }
+
     $compiler = Get-Command "ISCC.exe" -ErrorAction SilentlyContinue
     $compilerPath = if ($compiler) { $compiler.Source } else { $null }
     if (-not $compilerPath) {
