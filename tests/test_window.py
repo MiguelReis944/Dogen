@@ -445,7 +445,7 @@ def test_worker_failure_remains_visible_after_finish(tmp_path):
         window.close()
 
 
-def test_format_message_highlights_correction_tags(tmp_path):
+def test_format_message_keeps_corrections_out_of_conversation(tmp_path):
     app = QApplication.instance() or QApplication([])
     with Database(tmp_path / "conversation.db") as db:
         window = _make_window(db)
@@ -453,9 +453,7 @@ def test_format_message_highlights_correction_tags(tmp_path):
             "assistant",
             "Good try! [Correction: I goed → I went] [Better phrasing: I went to school]"
         )
-        assert '#e67e22' in html   # Correction tag: orange
-        assert '#27ae60' in html   # Better phrasing tag: green
-        assert 'I goed' in html
+        assert html == '<b>Dogen:</b> Good try!'
         window.close()
 
 

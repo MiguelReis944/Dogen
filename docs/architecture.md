@@ -38,3 +38,15 @@ somente as durações das etapas e o resultado de persistência de um turno.
 Gravação usa cliques para começar e terminar; revisão de transcrição tem timeout de
 15 segundos; a voz TTS exposta é a feminina local. A direção futura do domínio está
 em `docs/design/2026-09-27-learning-system-design.md`, não substitui a implementação.
+
+A resposta em streaming remove anotações de coaching antes de segmentar frases ou
+exibi-las. Fixes recebe somente pares de correção vinculados à transcrição do turno;
+categorias ficam como metadados internos. O histórico persistido continua intacto,
+mas anotações antigas são omitidas na conversa e no contexto enviado ao modelo.
+
+A síntese obtém áudio float em memória, sem normalização por pico de arquivo WAV e
+sem repetir a segmentação interna do Coqui. Uma fila limitada a dois chunks prepara
+a próxima frase durante a reprodução atual, inclusive em Replay. Acesso à síntese é
+serializado entre produtores interrompidos e novos turnos. Saídas não finitas,
+silenciosas, com formato inválido ou duração excessiva são rejeitadas; uma falha de
+áudio preserva a resposta em texto.

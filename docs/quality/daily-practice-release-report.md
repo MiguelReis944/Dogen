@@ -4,6 +4,42 @@
 
 **Status:** implementation complete; human acceptance pending
 
+## Narration and Fixes follow-up — 2026-10-01
+
+- Coaching blocks are filtered before streaming text reaches the conversation or
+  sentence segmentation. Incomplete and nested annotations cannot become narration;
+  old Grammar/Agreement comments are hidden on rendering and removed from model context
+  without rewriting the saved conversation.
+- Fixes accepts a brief correction pair grounded in the current transcript. Known
+  contraction, punctuation and optional style rewrites are rejected. Better-phrasing
+  blocks and category-only notes do not become learner feedback.
+- A bounded producer prepares audio while the preceding chunk plays, including Replay.
+  Synthesis calls are serialized across an interrupted producer and subsequent turns.
+  Text remains saved if synthesis or playback fails.
+- Coqui now returns float audio in memory. This avoids WAV peak normalization and
+  Coqui's extra sentence splitting, whose installed implementation pads each split
+  with 10,000 samples (453.5 ms at 22,050 Hz). Leading/trailing padding is trimmed with
+  short speech edges preserved. Invalid, nonfinite, silent or excessively long output
+  is rejected before speaker playback.
+- Silent checks of the cached female model on CPU synthesized three public test phrases
+  in 0.425, 0.858 and 4.031 seconds. No output was played through speakers or saved as
+  an audio file. These checks measure synthesis only, excluding Python import, Whisper,
+  Ollama and playback. Intermittent audible artifacts and the whole spoken turn still
+  require real-device acceptance.
+- A small six-case corpus using the local Ollama model and the actual runtime settings
+  accepted three substantive errors and rejected three false fixes after filtering.
+  The model still generated optional rewrites that the filters rejected. Two additional
+  gerund-error probes produced valid fixes but also unnecessary surrounding wording
+  changes. These checks are not a general accuracy benchmark or proof of optimal fixes.
+- Review identified a stale-producer cancellation race after Stop. A persistent
+  per-operation cancellation event and cancellation-aware synthesis-lock acquisition
+  now prevent queued work from restarting after interruption. A synchronous synthesis
+  already in progress can still finish, without playing its canceled output.
+- Verification: `python -m pytest -q -p no:cacheprovider` — 255 passed in 29.47s.
+  Regression coverage includes fragmented coaching markup, passive Fixes, saved-history
+  rendering, audio guards, prefetch, persistent cancellation and response preservation
+  after audio failure. The follow-up review found no remaining Important findings.
+
 ## Focus UI checkpoint — 2026-09-28
 
 - `PYTHONPATH=. pytest -q`: 110 passed in the final run (11.45 seconds) after updating the existing Ollama fake to accept and assert `keep_alive=-1`. The first full run had 109 passed and one failure because that fake rejected the new argument; no product code changed for this checkpoint.

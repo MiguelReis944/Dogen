@@ -1,7 +1,6 @@
 """Dogen's desktop conversation window and background worker."""
 
 import html
-import re
 import uuid
 from datetime import date
 
@@ -13,7 +12,7 @@ from PyQt5.QtWidgets import (QAction, QFileDialog, QGroupBox,
                               QStackedWidget, QTextEdit, QVBoxLayout, QWidget)
 
 from nlp.filler_words import highlight_fillers_html
-from nlp.feedback import CoachFeedback
+from nlp.feedback import CoachFeedback, parse_reply, strip_coaching_markup
 from nlp.llm import SCENARIOS, ConversationContext, build_system_prompt
 from pipeline import TurnCancelled
 from storage.progress import ProgressService
@@ -33,8 +32,6 @@ from utils.diagnostics import (
 )
 
 FEMALE_VOICE_MODEL = "tts_models/en/ljspeech/tacotron2-DDC"
-
-_CORRECTION_RE = re.compile(r'(\[[A-Z][^:\[\]\n]*:.*?\])', re.DOTALL)
 
 # How many pixels of RMS maps to 100% on the level meter
 _VOL_SCALE = 600
@@ -525,20 +522,11 @@ class MainWindow(QMainWindow):
         label = "You" if role == "user" else (
             "Dogen (response interrupted)" if not is_complete else "Dogen"
         )
+        if role == "assistant":
+            content = strip_coaching_markup(content)
         escaped = html.escape(content)
         if role == "user":
             escaped = highlight_fillers_html(escaped)
-        elif role == "assistant":
-            def _colorize(m):
-                tag = m.group(1)
-                if tag.startswith("[Correction:"):
-                    color = "#e67e22"
-                elif tag.startswith("[Better phrasing:"):
-                    color = "#27ae60"
-                else:
-                    color = "#3b82f6"
-                return f'<span style="color:{color}">{tag}</span>'
-            escaped = _CORRECTION_RE.sub(_colorize, escaped)
         return f"<b>{label}:</b> {escaped}"
 
     def _render_history(self):
@@ -554,20 +542,26 @@ class MainWindow(QMainWindow):
 
     def _render_fixes(self):
         self.fixes.clear()
-        feedback_items = self.db.feedback_for_session(self.session_id)
-        if not feedback_items:
+        rendered = [
+            self._format_feedback(feedback)
+            for feedback in self.db.feedback_for_session(self.session_id)
+        ]
+        rendered = [item for item in rendered if item]
+        if not rendered:
             self.fixes.setPlainText(
                 "No correction yet. Dogen will show a short text correction when your English needs one."
             )
             return
-        for feedback in feedback_items:
-            self.fixes.append(self._format_feedback(feedback))
+        for item in rendered:
+            self.fixes.append(item)
 
     def _format_feedback(self, feedback: CoachFeedback):
-        lines = []
-        if feedback.correction:
-            lines.append(f'<span style="color:#e67e22">{html.escape(feedback.correction)}</span>')
-        return "<br>".join(lines)
+        if not feedback.correction:
+            return ""
+        accepted = parse_reply(f"[Correction: {feedback.correction}]").feedback
+        if accepted.correction:
+            return f'<span style="color:#e67e22">{html.escape(accepted.correction)}</span>'
+        return ""
 
     # ── start / stop ───────────────────────────────────────────────────────────
 

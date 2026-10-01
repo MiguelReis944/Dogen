@@ -39,7 +39,16 @@ O Dogen responde em inglês e, quando detecta um erro significativo, acrescenta 
 [Correction: I go to school yesterday → I went to school yesterday]
 ```
 
-As correções aparecem como texto curto e somente leitura no painel **Fixes**. Fluency mode muda o estilo da conversa, mas não desativa as correções. O Dogen não inventa correções para inglês natural.
+As correções aparecem como texto curto e somente leitura no painel **Fixes**. Fluency
+mode muda o estilo da conversa, mas não desativa as correções. Comentários de Grammar,
+Agreement e outras anotações não aparecem na conversa nem são narrados. O filtro rejeita
+mudanças somente de contração, pontuação e algumas preferências de estilo, e confere se
+o trecho citado pertence à transcrição do turno. A qualidade restante depende do modelo
+local; a transcrição do Whisper também pode conter erros.
+
+A voz prepara a próxima frase durante a reprodução atual, sem a segunda divisão de
+frases e a normalização por pico de WAV do Coqui. Áudio inválido ou excessivamente longo
+gera uma indicação de falha; a resposta em texto continua salva e disponível.
 
 ## Sessões
 

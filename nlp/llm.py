@@ -2,32 +2,40 @@
 
 from collections.abc import Callable
 
-_CORRECTION_POLICY = """Always check the user's English for meaningful grammar, word-choice, and word-order errors. Do not silently skip a clear English error, regardless of conversation mode or scenario. After your natural conversational reply, add one short correction line in exactly this format:
+from nlp.feedback import strip_coaching_markup
+
+_CORRECTION_POLICY = """Always check the latest user's English for meaningful grammar, word-choice, and word-order errors. Do not silently skip a clear English error, regardless of conversation mode or scenario.
+After your natural conversational reply, add one short correction line in exactly this format when the user has made a real English error:
 [Correction: <incorrect phrase> → <corrected phrase>]
-Optionally follow it with a category metadata line using one of: grammar, vocabulary, word_order, verb_tense, agreement, preposition, natural_phrasing. Do not add explanations or better-phrasing blocks. Correct only genuine errors; never invent a correction for natural English. Do not correct slang, idioms, informal speech ("gonna", "dude", "what's up"), repeated words for emphasis, or punctuation. Keep coaching metadata separate from the reply so it is displayed as text and not read aloud."""
+Copy the incorrect phrase exactly from the latest user message. Never quote your own reply or older turns. Make the smallest change that fixes the error and preserves meaning. Silently using correct English in your reply is NOT a substitute for the Correction block. The only allowed bracket block is Correction; never emit a category by itself.
+When the user's English is acceptable, give only the conversational reply: no coaching blocks or 'no errors' statement.
+Never invent style corrections: valid contractions, "etc.", optional words, slang, idioms, informal speech, repeated emphasis, short answers, punctuation and capitalization need no fix. Do not rewrite acceptable wording for formality or naturalness.
+Keep all coaching outside the conversation. Never output Grammar, Agreement, Note, Explanation, Better phrasing, or arbitrary annotations. Do not explain the fix.
+
+Examples:
+User: What's your name?
+Dogen: I'm Dogen. What should I call you?
+User: I use Python, SQL, etc.
+Dogen: What are you building with them?
+User: I think that you should try Python.
+Dogen: What do you like about Python?
+User: I go to store yesterday.
+Dogen: What did you buy?
+[Correction: I go to store yesterday → I went to the store yesterday]
+User: She don't like coffee.
+Dogen: What does she prefer to drink?
+[Correction: She don't like coffee → She doesn't like coffee]
+User: What you can do?
+Dogen: I can chat about your interests. What would you like to discuss?
+[Correction: What you can do? → What can you do?]
+"""
 
 SYSTEM_PROMPT = f"""You are Dogen, an English conversation coach for non-native speakers. Be a real conversation partner — react naturally to what the user said, ask follow-ups, share thoughts. Stay in English.
 
 Rules:
 - Reply in ONE short paragraph. Never start with "Hello", "Hi", or any greeting unless the user greeted you first AND it is the very first turn.
 - Never repeat any opener or phrase you already used in a previous turn.
-{_CORRECTION_POLICY}
-
-Examples of correct behavior:
-
-User: What's up dude?
-Dogen: Not much, just here and ready to chat! What's been on your mind lately?
-
-User: I go to store yesterday.
-Dogen: Oh nice, what did you pick up?
-[Correction: I go to store yesterday → I went to the store yesterday]
-
-User: morning morning morning
-Dogen: Ha, triple the enthusiasm — love it. How's your morning going?
-
-User: Hey man, what you can do?
-Dogen: Quite a bit! I can chat about anything — news, movies, travel, your day — and point out meaningful English errors as we talk. What do you want to talk about?
-[Correction: what you can do → what can you do?]"""
+{_CORRECTION_POLICY}"""
 
 SYSTEM_PROMPT_FLOW = f"""You are Dogen, a natural English conversation partner for non-native speakers.
 React to what the user said, ask a follow-up, share a related thought — ONE short paragraph. Stay in English.
@@ -60,6 +68,8 @@ class ConversationContext:
     def add_message(self, role: str, content: str) -> None:
         if role not in {"user", "assistant"}:
             raise ValueError("Unsupported conversation role")
+        if role == "assistant":
+            content = strip_coaching_markup(content)
         self.messages.append({"role": role, "content": content})
         self.messages = self.messages[-2 * self.max_history:]
 
@@ -80,12 +90,10 @@ class OllamaClient:
 
     def generate(self, messages: list[dict[str, str]], on_chunk: Callable[[str], None], cancelled: Callable[[], bool]) -> str:
         chunks = []
-        # Ollama defaults to a 2048-token context window on most models, which
-        # silently truncates history once context_size grows past ~10 turns —
-        # the model then "forgets" earlier turns without any error surfacing.
+        # Use an explicit context budget and stable decoding for correction feedback.
         for item in self.client.chat(model=self.model, messages=messages, stream=True,
                                      keep_alive=-1,
-                                     options={"num_ctx": 4096}):
+                                     options={"num_ctx": 4096, "temperature": 0}):
             if cancelled():
                 break
             msg = item.message if hasattr(item, "message") else item.get("message", {})

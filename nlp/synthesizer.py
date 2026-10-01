@@ -1,26 +1,33 @@
-"""Local Coqui synthesis using a temporary WAV file."""
+"""Local Coqui synthesis with validated in-memory audio."""
 
 import re
 from pathlib import Path
-from tempfile import NamedTemporaryFile
 
 import numpy as np
-from scipy.io import wavfile
 
 _SENTENCE_RE = re.compile(r'(?<=[.!?])\s+')
 
 
 def _trim_silence(samples: np.ndarray, sample_rate: int,
-                  threshold: float = 0.005, tail_ms: int = 80) -> np.ndarray:
-    """Remove trailing silence that Coqui tacotron adds after each sentence."""
+                  threshold: float = 0.005, tail_ms: int = 80,
+                  head_ms: int = 20) -> np.ndarray:
+    """Keep short speech edges while removing Coqui's sentence padding."""
     block = max(1, sample_rate // 100)   # 10 ms blocks
+    start = 0
+    while start < len(samples):
+        if float(np.sqrt(np.mean(samples[start:start + block] ** 2))) > threshold:
+            break
+        start += block
+    if start >= len(samples):
+        return samples[:0]
     end = len(samples)
-    while end > block:
-        if float(np.sqrt(np.mean(samples[end - block:end] ** 2))) > threshold:
+    while end > start:
+        if float(np.sqrt(np.mean(samples[max(start, end - block):end] ** 2))) > threshold:
             break
         end -= block
+    head = int(head_ms / 1000 * sample_rate)
     tail = int(tail_ms / 1000 * sample_rate)
-    return samples[:min(len(samples), end + tail)]
+    return samples[max(0, start - head):min(len(samples), end + tail)]
 
 
 # Short fixed phrases that Dogen says often enough to be worth caching on startup.
@@ -64,24 +71,26 @@ class Synthesizer:
                 pass
 
     def _synthesize_raw(self, text: str) -> tuple:
-        with NamedTemporaryFile(suffix=".wav", delete=False) as target:
-            path = Path(target.name)
-        try:
-            kwargs = {"text": text, "file_path": str(path)}
-            if self._speaker:
-                kwargs["speaker"] = self._speaker
-            self.tts.tts_to_file(**kwargs)
-            sample_rate, samples = wavfile.read(path)
-            if samples.dtype.kind in "iu":
-                samples = samples.astype("float32") / max(
-                    abs(float(samples.min())), abs(float(samples.max())), 1
-                )
-            return _trim_silence(samples, sample_rate), sample_rate
-        finally:
-            try:
-                path.unlink(missing_ok=True)
-            except PermissionError:
-                pass  # Windows: TTS may still hold the handle briefly
+        # We already stream one sentence at a time. Coqui's second split adds
+        # silence between fragments; its WAV writer also boosts quiet noise.
+        kwargs = {"text": text, "split_sentences": False}
+        if self._speaker:
+            kwargs["speaker"] = self._speaker
+        samples = np.asarray(self.tts.tts(**kwargs), dtype=np.float32)
+        sample_rate = self.tts.synthesizer.output_sample_rate
+        if (not isinstance(sample_rate, (int, np.integer)) or sample_rate <= 0
+                or samples.ndim != 1 or not samples.size
+                or not np.isfinite(samples).all()):
+            raise ValueError("The voice model returned invalid audio.")
+        samples = _trim_silence(np.clip(samples, -1.0, 1.0), sample_rate)
+        if not samples.size:
+            raise ValueError("The voice model returned silent audio.")
+        # A generous slow-speech limit catches Tacotron decoder runaway instead
+        # of playing a long noisy waveform for a short phrase.
+        max_duration = max(8.0, len(text) * 0.12)
+        if len(samples) / sample_rate > max_duration:
+            raise ValueError("The voice model returned an excessive audio duration.")
+        return samples, sample_rate
 
     def synthesize(self, text: str) -> tuple:
         if text in self._cache:

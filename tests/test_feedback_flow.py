@@ -75,7 +75,6 @@ def test_coaching_feedback_flows_from_model_text_to_fixes(tmp_path):
             fixes = window.fixes.toPlainText()
             assert result.feedback == CoachFeedback(
                 correction="I goed yesterday → I went yesterday",
-                better_phrasing="I went there yesterday.",
                 category="verb_tense",
             )
             assert fixes.strip() == "I goed yesterday → I went yesterday"
@@ -111,7 +110,7 @@ def test_fluency_mode_keeps_corrections_enabled_and_displays_them_as_text(tmp_pa
             assert window.fixes.isReadOnly()
             assert db.feedback_for_session("session") == [result.feedback]
             assert "Do not silently skip a clear English error" in llm.messages[0]["content"]
-            assert "never invent a correction for natural English" in llm.messages[0]["content"]
+            assert "Never invent style corrections" in llm.messages[0]["content"]
             assert "Do NOT add any bracket annotation blocks" not in llm.messages[0]["content"]
         finally:
             window.close()
@@ -123,5 +122,5 @@ def test_all_scenarios_require_corrections_without_inventing_them():
             prompt = build_system_prompt(scenario, fluency_mode=fluency_mode)
 
             assert "Do not silently skip a clear English error" in prompt
-            assert "never invent a correction for natural English" in prompt
+            assert "Never invent style corrections" in prompt
             assert "occasional grammar slip" not in prompt

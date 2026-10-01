@@ -396,7 +396,6 @@ def test_legacy_turn_annotations_are_available_as_fixes(tmp_path):
 
         assert db.feedback_for_session("s1") == [CoachFeedback(
             correction="I goed → I went",
-            better_phrasing="I headed home.",
             category="verb_tense",
         )]
 
@@ -581,7 +580,7 @@ def test_ollama_client_sets_context_window(monkeypatch):
     monkeypatch.setattr("ollama.Client", FakeOllamaClient)
     client = OllamaClient("http://localhost:11434", "mistral")
     client.generate([], lambda token: None, lambda: False)
-    assert calls == [({"num_ctx": 4096}, -1)]
+    assert calls == [({"num_ctx": 4096, "temperature": 0}, -1)]
 
 
 def test_database_session_per_day(tmp_path):

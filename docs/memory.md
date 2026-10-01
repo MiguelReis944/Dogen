@@ -11,6 +11,14 @@
 - O modo Fluency muda o estilo conversacional, mas não desativa correções de erros
   significativos em inglês. Fixes mostra texto breve, sem controles de correção; não se
   inventam correções para frases naturais.
+- Anotações como Grammar, Agreement e Note são removidas antes da exibição e narração,
+  inclusive quando chegam em pedaços. Fixes rejeita equivalências de contração,
+  pontuação e algumas sugestões de estilo; a frase citada precisa aparecer na
+  transcrição do turno. Isso não garante que o modelo identifique todo erro real nem
+  distingue com certeza um erro do Whisper de um erro de inglês.
+- A voz usa áudio float em memória e prepara chunks antes do fim da reprodução
+  anterior. O WAV normalizado por pico e a segunda divisão de frases do Coqui
+  amplificavam artefatos e acrescentavam pausas.
 - Palavras e fillers são estimados a partir da transcrição final enviada ao coach, que pode
   ter sido editada; o streak conta dias com tentativa do usuário, mesmo se a resposta for
   interrompida.

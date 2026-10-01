@@ -393,7 +393,7 @@ def test_pipeline_returns_message_and_structured_feedback_separately():
         def generate(self, messages, on_chunk, cancelled):
             response = (
                 "What did you buy?\n"
-                "[Correction: I go yesterday → I went yesterday]\n"
+                "[Correction: I goed → I went]\n"
                 "[Better phrasing: I stopped by yesterday.]\n"
                 "[Category: verb_tense]"
             )
@@ -411,8 +411,7 @@ def test_pipeline_returns_message_and_structured_feedback_separately():
         transcript="I goed to school",
         reply="What did you buy?",
         feedback=CoachFeedback(
-            correction="I go yesterday → I went yesterday",
-            better_phrasing="I stopped by yesterday.",
+            correction="I goed → I went",
             category="verb_tense",
         ),
         metrics=TurnMetrics(4, 0, False, "verb_tense"),
