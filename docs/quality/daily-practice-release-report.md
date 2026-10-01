@@ -157,7 +157,7 @@ Executed in the Dogen checkout on 2026-10-01:
 
 Result:
 
-- 263 tests passed in 33.34 seconds;
+- 264 tests passed in 27.19 seconds;
 - no broken Python requirements;
 - `ui`, `nlp`, and `tests` compile without syntax errors;
 - `git diff --check` reported no whitespace errors (only Git line-ending notices).

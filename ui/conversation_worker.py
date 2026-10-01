@@ -179,9 +179,39 @@ class ConversationWorker(QThread):
         return True
 
     def _release_model(self, pipeline, name: str, requested_model: str) -> bool:
+        client = pipeline.llm.client
+        ps = getattr(client, "ps", None)
+        if callable(ps):
+            try:
+                response = ps()
+                models = (
+                    response.models if hasattr(response, "models")
+                    else response.get("models")
+                )
+                if models is not None:
+                    resident_names = set()
+                    for model in models:
+                        if isinstance(model, dict):
+                            resident_name = model.get("name") or model.get("model") or ""
+                        else:
+                            resident_name = (
+                                getattr(model, "name", None)
+                                or getattr(model, "model", "")
+                            )
+                        if resident_name:
+                            resident_names.add(resident_name)
+                    if name not in resident_names:
+                        if self._active_model == name:
+                            self._active_model = None
+                            self.model_unloaded.emit(name)
+                        return True
+            except Exception:
+                # If Ollama cannot report residency, try the explicit unload below.
+                pass
+
         self.status_message.emit(f"Releasing {name} from Ollama...")
         try:
-            pipeline.llm.client.generate(
+            client.generate(
                 model=name, prompt="", options={"num_predict": 0},
                 keep_alive=0,
             )

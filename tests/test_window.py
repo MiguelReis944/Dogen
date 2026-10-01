@@ -165,6 +165,33 @@ def test_explicitly_loading_active_model_warms_it_again():
     assert calls[0]["keep_alive"] == "5m"
 
 
+def test_switch_skips_release_when_previous_model_is_no_longer_resident():
+    app = QApplication.instance() or QApplication([])
+    calls = []
+
+    class Ollama:
+        def ps(self):
+            return SimpleNamespace(models=[])
+
+        def list(self):
+            return []
+
+        def generate(self, **kwargs):
+            calls.append(kwargs)
+
+    pipeline = SimpleNamespace(llm=SimpleNamespace(client=Ollama(), model="mistral"))
+    worker = ConversationWorker(AppConfig(), ConversationContext(), "mistral")
+    worker._active_model = "mistral"
+
+    assert worker._handle_model_request(pipeline, ("llama3.2:3b", ()))
+
+    assert calls == [{
+        "model": "llama3.2:3b", "prompt": "", "options": {"num_predict": 0},
+        "keep_alive": "5m",
+    }]
+    assert worker._active_model == "llama3.2:3b"
+
+
 def test_model_fetcher_includes_global_resident_vram(monkeypatch):
     app = QApplication.instance() or QApplication([])
 

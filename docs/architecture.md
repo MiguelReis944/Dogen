@@ -42,8 +42,10 @@ instalados e consulta `/api/ps` sem carregar um LLM. A última seleção fica pr
 mas o carregamento exige a ação explícita **Load selected model** depois que a pessoa
 confirma sua escolha. Isso evita aquecer o padrão antes que a seleção persistida seja
 restaurada. `ConversationWorker` é dono do aquecimento e das trocas: ao alternar,
-descarrega o modelo ativado anteriormente pelo Dogen com `keep_alive=0` antes de aquecer
-o novo com retenção de cinco minutos. As chamadas de conversa usam a mesma retenção, para
+consulta `/api/ps` e descarrega o modelo ativado anteriormente pelo Dogen com
+`keep_alive=0` apenas se ainda estiver residente, antes de aquecer o novo com retenção de
+cinco minutos. Se o modelo já tiver expirado ou sido removido, Dogen pula o unload
+redundante. As chamadas de conversa usam a mesma retenção, para
 que o modelo seja liberado após inatividade em vez de permanecer indefinidamente.
 Ollama não informa qual aplicativo carregou cada modelo; a lista residente e a VRAM são
 globais ao servidor. Dogen não descarrega automaticamente modelos de origem desconhecida.
