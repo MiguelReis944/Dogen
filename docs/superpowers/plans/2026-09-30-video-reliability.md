@@ -78,7 +78,7 @@ These are incremental quality improvements, not a rewrite. Apply them alongside 
 - Modify: `ui/main_window.py`, `README.md`, and `docs/architecture.md` for the review countdown and its documented behavior.
 - Extend: `tests/test_feedback.py`, `tests/test_pipeline.py`, `tests/test_core.py`, `tests/test_window.py`.
 
-- [ ] Add an end-to-end test using a deterministic coaching-mode response with a structured correction. Verify it passes through parsing, storage, and the read-only Fixes view. Add a corresponding Fluency-mode test confirming no correction is fabricated.
+- [x] Add an end-to-end test using a deterministic coaching-mode response with a structured correction. Verify it passes through parsing, storage, and the read-only Fixes view. Add a corresponding Fluency-mode test confirming no correction is fabricated.
 - [ ] Reproduce the empty Fixes case with a known learner error while explicitly confirming Coaching mode. If structured feedback exists but is not displayed, repair that UI/storage boundary; if the model emits no structured feedback, do not promise that every error will be corrected and do not mix in an unrequested prompt rewrite.
 - [x] Increase transcript auto-send from 5 to 15 seconds, update the visible countdown/status to match, and test auto-send, immediate Enter/send, and Retry/cancel without duplicate turns. Keep the current setting file untouched.
 - [x] Run the focused feedback/window tests, then `python -m pytest -q`.
