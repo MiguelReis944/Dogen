@@ -25,6 +25,24 @@ def verify_tts_config_sources(bundle_root, source_tts_root):
     return len(expected)
 
 
+def verify_tts_torchscript_sources(bundle_root, source_tts_root):
+    """Ensure PyTorch can inspect Coqui modules decorated with TorchScript."""
+    relative_source = Path("vocoder") / "layers" / "wavegrad.py"
+    source_module = Path(source_tts_root) / relative_source
+    bundled_module = Path(bundle_root) / "_internal" / "TTS" / relative_source
+
+    if not source_module.is_file():
+        raise RuntimeError(
+            f"Coqui TorchScript source file not found in build environment: {source_module}"
+        )
+    if not bundled_module.is_file():
+        raise RuntimeError(
+            "Dogen bundle is missing the Coqui TorchScript source file: "
+            "TTS/vocoder/layers/wavegrad.py"
+        )
+    return 1
+
+
 def verify_ko_speech_data_files(bundle_root, source_ko_speech_root):
     """Ensure ko-speech-tools' namespace-package resources are bundled."""
     source_data = Path(source_ko_speech_root) / "data"
@@ -63,6 +81,9 @@ def main():
         parser.error("coqui-tts is not available in the build environment")
     source_tts_root = Path(next(iter(package_spec.submodule_search_locations)))
     count = verify_tts_config_sources(args.bundle_root, source_tts_root)
+    torchscript_count = verify_tts_torchscript_sources(
+        args.bundle_root, source_tts_root
+    )
     package_spec = find_spec("ko_speech_tools")
     if not package_spec or not package_spec.submodule_search_locations:
         parser.error("ko-speech-tools is not available in the build environment")
@@ -72,6 +93,7 @@ def main():
     )
     print(
         f"Verified {count} Coqui TTS vocoder config sources and "
+        f"{torchscript_count} Coqui TorchScript source files and "
         f"{data_count} ko-speech-tools data files in the app bundle."
     )
 
