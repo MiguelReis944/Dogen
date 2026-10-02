@@ -8,6 +8,7 @@ from PyQt5.QtWidgets import QApplication, QDialog, QMessageBox
 
 from nlp.llm import ConversationContext, build_system_prompt
 from storage.db import Database
+from scripts.verify_tts_runtime import run_smoke_check as run_tts_runtime_smoke_check
 from ui.dogen_logo import dogen_window_icon, set_windows_app_user_model_id
 from ui.main_window import MainWindow
 from ui.setup_wizard import SetupWizard, should_show_setup_wizard
@@ -29,6 +30,8 @@ from utils.paths import (
 
 
 def main():
+    if "--verify-tts-runtime" in sys.argv[1:]:
+        return run_tts_runtime_smoke_check()
     configure_model_cache_dirs()
     set_windows_app_user_model_id()
     app = QApplication(sys.argv)

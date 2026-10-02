@@ -49,3 +49,11 @@ def test_packaged_model_caches_use_app_local_data_and_respect_overrides(
 
     assert Path(paths.os.environ["TTS_HOME"]) == tmp_path / "custom-tts"
     assert Path(paths.os.environ["XDG_CACHE_HOME"]) == tmp_path / "custom-cache"
+
+
+def test_tts_frozen_smoke_checks_gui_process_exit_and_uses_local_cache():
+    script = Path("packaging/build_windows.ps1").read_text(encoding="utf-8")
+
+    assert "Start-Process" in script
+    assert "$ttsSmokeProcess.ExitCode" in script
+    assert "$env:DOGEN_TTS_SMOKE_CACHE" in script

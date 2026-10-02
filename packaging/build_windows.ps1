@@ -30,9 +30,58 @@ try {
         throw "The Dogen app bundle is missing required Coqui runtime files."
     }
 
-    $smokeRoot = [System.IO.Path]::GetFullPath((Join-Path $projectRoot "build\ko-speech-smoke"))
     $buildRoot = [System.IO.Path]::GetFullPath((Join-Path $projectRoot "build"))
+    $ttsSmokeName = "tts-runtime-smoke-" + [guid]::NewGuid().ToString("N")
+    $ttsSmokeRoot = [System.IO.Path]::GetFullPath((Join-Path $buildRoot $ttsSmokeName))
     $buildPrefix = $buildRoot.TrimEnd([char]'\') + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $ttsSmokeRoot.StartsWith($buildPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "The TTS smoke-test data must stay inside the project build directory."
+    }
+    $previousTtsHome = $env:TTS_HOME
+    $previousSmokeCache = $env:DOGEN_TTS_SMOKE_CACHE
+    $previousNumbaCacheLocatorClasses = $env:NUMBA_CACHE_LOCATOR_CLASSES
+    try {
+        New-Item -ItemType Directory -Path $ttsSmokeRoot | Out-Null
+        $env:TTS_HOME = Join-Path $ttsSmokeRoot "tts"
+        $env:DOGEN_TTS_SMOKE_CACHE = Join-Path $ttsSmokeRoot "numba-cache"
+        $env:NUMBA_CACHE_LOCATOR_CLASSES = "UserWideCacheLocator"
+        $ttsSmokeExecutable = Join-Path $projectRoot "build\dist\Dogen\Dogen.exe"
+        $ttsSmokeProcess = Start-Process -FilePath $ttsSmokeExecutable `
+            -ArgumentList "--verify-tts-runtime" `
+            -WorkingDirectory $projectRoot -WindowStyle Hidden -Wait -PassThru
+        if ($ttsSmokeProcess.ExitCode -ne 0) {
+            throw "The frozen Coqui/inflect voice-import smoke test failed with exit code $($ttsSmokeProcess.ExitCode)."
+        }
+    }
+    finally {
+        if ($null -eq $previousTtsHome) {
+            Remove-Item Env:TTS_HOME -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:TTS_HOME = $previousTtsHome
+        }
+        if ($null -eq $previousSmokeCache) {
+            Remove-Item Env:DOGEN_TTS_SMOKE_CACHE -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:DOGEN_TTS_SMOKE_CACHE = $previousSmokeCache
+        }
+        if ($null -eq $previousNumbaCacheLocatorClasses) {
+            Remove-Item Env:NUMBA_CACHE_LOCATOR_CLASSES -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:NUMBA_CACHE_LOCATOR_CLASSES = $previousNumbaCacheLocatorClasses
+        }
+        if (Test-Path -LiteralPath $ttsSmokeRoot) {
+            $resolvedSmokeRoot = (Resolve-Path -LiteralPath $ttsSmokeRoot).Path
+            if (-not $resolvedSmokeRoot.StartsWith($buildPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                throw "Refusing to remove TTS smoke-test data outside the project build directory."
+            }
+            Remove-Item -LiteralPath $resolvedSmokeRoot -Recurse -Force
+        }
+    }
+
+    $smokeRoot = [System.IO.Path]::GetFullPath((Join-Path $projectRoot "build\ko-speech-smoke"))
     if (-not $smokeRoot.StartsWith($buildPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "The Coqui smoke-test output must stay inside the project build directory."
     }

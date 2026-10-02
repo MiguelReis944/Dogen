@@ -7,6 +7,7 @@ import pytest
 import scripts.verify_bundle as verify_bundle
 from scripts.verify_bundle import (
     verify_ko_speech_data_files,
+    verify_inflect_source_files,
     verify_tts_config_sources,
     verify_tts_torchscript_sources,
 )
@@ -158,6 +159,34 @@ def test_bundle_validation_accepts_bundled_torchscript_module_sources(tmp_path):
         )
 
     assert verify_tts_torchscript_sources(bundled_root, source_tts_root) == 2
+
+
+def test_bundle_validation_rejects_missing_inflect_source(tmp_path):
+    source_root = tmp_path / "site-packages" / "inflect"
+    source_root.mkdir(parents=True)
+    (source_root / "__init__.py").write_text("def engine(): pass\n", encoding="utf-8")
+
+    bundled_root = tmp_path / "dist" / "Dogen"
+    bundled_root.mkdir(parents=True)
+
+    with pytest.raises(RuntimeError, match="__init__.py"):
+        verify_inflect_source_files(bundled_root, source_root)
+
+
+def test_bundle_validation_accepts_all_inflect_source_files(tmp_path):
+    source_root = tmp_path / "site-packages" / "inflect"
+    source_root.mkdir(parents=True)
+    expected = {"__init__.py", "compat.py"}
+    for filename in expected:
+        (source_root / filename).write_text("# source\n", encoding="utf-8")
+
+    bundled_root = tmp_path / "dist" / "Dogen"
+    bundled_sources = bundled_root / "_internal" / "inflect"
+    bundled_sources.mkdir(parents=True)
+    for filename in expected:
+        (bundled_sources / filename).write_text("# source\n", encoding="utf-8")
+
+    assert verify_inflect_source_files(bundled_root, source_root) == 2
 
 
 def test_bundle_validation_rejects_missing_generic_wavenet_source(tmp_path):

@@ -46,6 +46,11 @@ extraídos como fontes: ambos definem funções `torch.jit.script`, cujo import 
 o `.py` fisicamente. O build verifica e executa os dois módulos extraídos para detectar
 omissões ou corrupção.
 
+O setup também importa `inflect.engine()` por meio do `typeguard`, que usa
+`inspect.getsource`; preserve todos os arquivos Python de `inflect` no bundle congelado
+(`pyz+py`) e valide cada fonte. O smoke test congelado deve executar o caminho real de
+`check_tts` do Dogen sem baixar o modelo de voz.
+
 Falhas de carregamento detectadas pelo worker deixam a mensagem e permitem `Retry loading`
 depois de corrigir a causa; falhas de um turno voltam ao modo de gravação e preservam o
 texto de diagnóstico até a próxima tentativa. A verificação inicial de microfone em

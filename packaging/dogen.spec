@@ -62,6 +62,8 @@ a = Analysis(
     noarchive=False,
     # Coqui scans this package with os.listdir(__file__'s directory) at import.
     module_collection_mode={
+        # typeguard instruments inflect.engine at import and calls inspect.getsource.
+        "inflect": "pyz+py",
         "TTS.vocoder.configs": "pyz+py",
         "TTS.vocoder.layers.wavegrad": "pyz+py",
         "TTS.tts.layers.generic.wavenet": "pyz+py",

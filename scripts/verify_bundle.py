@@ -61,6 +61,34 @@ def verify_tts_torchscript_sources(bundle_root, source_tts_root):
     return checked
 
 
+def verify_inflect_source_files(bundle_root, source_inflect_root):
+    """Ensure inflect's inspect/typeguard instrumentation can read real source."""
+    source_root = Path(source_inflect_root)
+    bundled_root = Path(bundle_root) / "_internal" / "inflect"
+    expected = {
+        path.relative_to(source_root)
+        for path in source_root.rglob("*.py")
+        if path.is_file()
+    }
+    actual = {
+        path.relative_to(bundled_root)
+        for path in bundled_root.rglob("*.py")
+        if path.is_file()
+    }
+
+    if not expected:
+        raise RuntimeError(f"No inflect Python source files found in {source_root}")
+    missing = sorted(
+        "inflect/" + str(path).replace("\\", "/") for path in expected - actual
+    )
+    if missing:
+        raise RuntimeError(
+            "Dogen bundle is missing inflect Python source files required by "
+            "typeguard: " + ", ".join(missing)
+        )
+    return len(expected)
+
+
 def verify_ko_speech_data_files(bundle_root, source_ko_speech_root):
     """Ensure ko-speech-tools' namespace-package resources are bundled."""
     source_data = Path(source_ko_speech_root) / "data"
@@ -102,6 +130,13 @@ def main():
     torchscript_count = verify_tts_torchscript_sources(
         args.bundle_root, source_tts_root
     )
+    package_spec = find_spec("inflect")
+    if not package_spec or not package_spec.submodule_search_locations:
+        parser.error("inflect is not available in the build environment")
+    source_inflect_root = Path(next(iter(package_spec.submodule_search_locations)))
+    inflect_source_count = verify_inflect_source_files(
+        args.bundle_root, source_inflect_root
+    )
     package_spec = find_spec("ko_speech_tools")
     if not package_spec or not package_spec.submodule_search_locations:
         parser.error("ko-speech-tools is not available in the build environment")
@@ -112,6 +147,7 @@ def main():
     print(
         f"Verified {count} Coqui TTS vocoder config sources and "
         f"{torchscript_count} Coqui TorchScript source files and "
+        f"{inflect_source_count} inflect source files and "
         f"{data_count} ko-speech-tools data files in the app bundle."
     )
 

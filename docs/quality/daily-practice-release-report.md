@@ -273,3 +273,24 @@ LJSpeech loaded in 14.785 seconds and synthesized five fixed sentences in 0.611�
 - Seven real days of at least 15 minutes of dogfooding.
 
 The release must not be called fully validated until the pending manual acceptance rows are completed with real measurements.
+
+## Frozen `inflect` import follow-up — 2026-10-02
+
+- The setup traceback reached `inflect.engine()` and showed `typeguard` failing at
+  `inspect.getsource`. PyInstaller had the package bytecode but not the three Python
+  source files that this runtime inspection needs. The spec now preserves `inflect` as
+  `pyz+py`, and bundle validation rejects any missing source file.
+- The build now runs the setup check (`preflight.check_tts`) inside the actual frozen
+  `Dogen.exe` without requiring a cached model. It waits for and checks the GUI process's
+  exit code, and redirects the smoke test's temporary Numba cache into the disposable
+  build directory.
+- Verification: `python -m pytest -q -p no:cacheprovider` — 304 passed; bundle check
+  found 10 Coqui config sources, 2 TorchScript source files, 3 `inflect` source files,
+  and 13 `ko_speech_tools` data files; the frozen voice-import smoke test exited 0;
+  the Korean resource smoke test and Inno Setup compile passed.
+- Rebuilt `build/installer/Dogen-Setup.exe` (205,302,754 bytes; SHA-256
+  `4CF55C5F4838D7260F86F35F1F832F5DA69E5E6424861FA3390F2D8505BA984F`). The previously
+  tested installer was preserved at `build/previous-release-before-inflect-fix/`.
+- The installer still needs manual installation and real voice-model playback on the
+  user's machine; the smoke test confirms the import/setup check, not model download,
+  synthesis quality, or audio-device playback.
