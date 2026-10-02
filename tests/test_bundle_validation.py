@@ -137,25 +137,57 @@ def test_bundle_validation_rejects_missing_torchscript_module_source(
         verify_bundle.main()
 
 
-def test_bundle_validation_accepts_bundled_torchscript_module_source(tmp_path):
+def test_bundle_validation_accepts_bundled_torchscript_module_sources(tmp_path):
     source_tts_root = tmp_path / "site-packages" / "TTS"
-    source_module = source_tts_root / "vocoder" / "layers" / "wavegrad.py"
-    source_module.parent.mkdir(parents=True)
-    source_module.write_text(
+    bundled_root = tmp_path / "dist" / "Dogen"
+    relative_sources = (
+        Path("vocoder") / "layers" / "wavegrad.py",
+        Path("tts") / "layers" / "generic" / "wavenet.py",
+    )
+    for relative_source in relative_sources:
+        source_module = source_tts_root / relative_source
+        source_module.parent.mkdir(parents=True, exist_ok=True)
+        source_module.write_text(
+            "import torch\n@torch.jit.script\ndef scripted_helper(x): return x\n",
+            encoding="utf-8",
+        )
+        bundled_module = bundled_root / "_internal" / "TTS" / relative_source
+        bundled_module.parent.mkdir(parents=True, exist_ok=True)
+        bundled_module.write_text(
+            source_module.read_text(encoding="utf-8"), encoding="utf-8"
+        )
+
+    assert verify_tts_torchscript_sources(bundled_root, source_tts_root) == 2
+
+
+def test_bundle_validation_rejects_missing_generic_wavenet_source(tmp_path):
+    source_tts_root = tmp_path / "site-packages" / "TTS"
+    bundled_root = tmp_path / "dist" / "Dogen"
+
+    wavegrad_relative = Path("vocoder") / "layers" / "wavegrad.py"
+    source_wavegrad = source_tts_root / wavegrad_relative
+    source_wavegrad.parent.mkdir(parents=True)
+    source_wavegrad.write_text(
         "import torch\n@torch.jit.script\ndef scripted_helper(x): return x\n",
         encoding="utf-8",
     )
-
-    bundled_module = (
-        tmp_path / "dist" / "Dogen" / "_internal" / "TTS"
-        / "vocoder" / "layers" / "wavegrad.py"
+    bundled_wavegrad = bundled_root / "_internal" / "TTS" / wavegrad_relative
+    bundled_wavegrad.parent.mkdir(parents=True)
+    bundled_wavegrad.write_text(
+        source_wavegrad.read_text(encoding="utf-8"), encoding="utf-8"
     )
-    bundled_module.parent.mkdir(parents=True)
-    bundled_module.write_text(source_module.read_text(encoding="utf-8"), encoding="utf-8")
 
-    assert verify_tts_torchscript_sources(
-        bundled_module.parents[4], source_tts_root
-    ) == 1
+    wavenet_relative = Path("tts") / "layers" / "generic" / "wavenet.py"
+    source_wavenet = source_tts_root / wavenet_relative
+    source_wavenet.parent.mkdir(parents=True)
+    source_wavenet.write_text(
+        "import torch\n@torch.jit.script\ndef scripted_helper(x): return x\n",
+        encoding="utf-8",
+    )
+    # The bundle currently extracts wavegrad.py but omits this second
+    # TorchScript source that Coqui imports for its TTS layer modules.
+    with pytest.raises(RuntimeError, match="TTS/tts/layers/generic/wavenet.py"):
+        verify_tts_torchscript_sources(bundled_root, source_tts_root)
 
 
 def test_bundle_validation_rejects_torchscript_source_that_cannot_be_loaded(tmp_path):

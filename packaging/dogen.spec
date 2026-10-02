@@ -64,6 +64,7 @@ a = Analysis(
     module_collection_mode={
         "TTS.vocoder.configs": "pyz+py",
         "TTS.vocoder.layers.wavegrad": "pyz+py",
+        "TTS.tts.layers.generic.wavenet": "pyz+py",
     },
     optimize=0,
 )

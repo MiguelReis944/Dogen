@@ -179,6 +179,22 @@
   manual acceptance. If the voice is marked **Needs download**, choose **No** in the
   incomplete prompt, then choose **Prepare speech models** in the setup guide.
 
+## Frozen voice source follow-up — 2026-10-02
+
+- The user-reported `could not get source code` error came from an installed executable
+  byte-for-byte identical to the bundle used at diagnosis. That bundle included
+  `wavegrad.py` but omitted `TTS/tts/layers/generic/wavenet.py`, which also defines a
+  function decorated with `torch.jit.script`; this is a concrete packaging cause
+  consistent with the error.
+- The PyInstaller spec now preserves both source modules. Bundle verification executes
+  both extracted TorchScript modules and rejects a missing one before installer creation.
+- Verification: `python -m pytest -q -p no:cacheprovider` — 296 passed; the bundle
+  verifier found 10 Coqui config sources, 2 TorchScript source files, and 13
+  `ko_speech_tools` data files; the frozen resource smoke test and Inno Setup compilation
+  passed. The rebuilt installer is `build/installer/Dogen-Setup.exe` (205,268,642 bytes).
+- A real Coqui model load and spoken playback have not yet been accepted after installing
+  this build; those still require testing in the user's running app with its local model.
+
 ## Environment
 
 - Operating system: Windows

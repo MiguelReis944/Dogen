@@ -6,6 +6,12 @@ from importlib.util import find_spec
 from pathlib import Path
 
 
+TORCHSCRIPT_SOURCE_MODULES = (
+    Path("vocoder") / "layers" / "wavegrad.py",
+    Path("tts") / "layers" / "generic" / "wavenet.py",
+)
+
+
 def verify_tts_config_sources(bundle_root, source_tts_root):
     """Ensure every source config Coqui scans is present beside the frozen app."""
     source_configs = Path(source_tts_root) / "vocoder" / "configs"
@@ -28,27 +34,31 @@ def verify_tts_config_sources(bundle_root, source_tts_root):
 
 def verify_tts_torchscript_sources(bundle_root, source_tts_root):
     """Ensure PyTorch can inspect Coqui modules decorated with TorchScript."""
-    relative_source = Path("vocoder") / "layers" / "wavegrad.py"
-    source_module = Path(source_tts_root) / relative_source
-    bundled_module = Path(bundle_root) / "_internal" / "TTS" / relative_source
+    checked = 0
+    for relative_source in TORCHSCRIPT_SOURCE_MODULES:
+        source_module = Path(source_tts_root) / relative_source
+        bundled_module = Path(bundle_root) / "_internal" / "TTS" / relative_source
 
-    if not source_module.is_file():
-        raise RuntimeError(
-            "Coqui TorchScript source file not found in build environment: "
-            f"{source_module}"
-        )
-    if not bundled_module.is_file():
-        raise RuntimeError(
-            "Dogen bundle is missing the Coqui TorchScript source file: "
-            "TTS/vocoder/layers/wavegrad.py"
-        )
-    try:
-        runpy.run_path(str(bundled_module))
-    except Exception as exc:
-        raise RuntimeError(
-            "The Coqui TorchScript source file could not be loaded by PyTorch."
-        ) from exc
-    return 1
+        if not source_module.is_file():
+            raise RuntimeError(
+                "Coqui TorchScript source file not found in build environment: "
+                f"{source_module}"
+            )
+        if not bundled_module.is_file():
+            relative_posix = relative_source.as_posix()
+            raise RuntimeError(
+                "Dogen bundle is missing the Coqui TorchScript source file: "
+                f"TTS/{relative_posix}"
+            )
+        try:
+            runpy.run_path(str(bundled_module))
+        except Exception as exc:
+            raise RuntimeError(
+                "The Coqui TorchScript source file could not be loaded by PyTorch: "
+                f"TTS/{relative_source.as_posix()}"
+            ) from exc
+        checked += 1
+    return checked
 
 
 def verify_ko_speech_data_files(bundle_root, source_ko_speech_root):
