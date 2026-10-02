@@ -101,7 +101,9 @@ configuração do usuário. Ao executar pelo código-fonte, o Dogen também lê
 `settings.json` na raiz do repositório, que pode sobrescrever esses valores; no
 instalador, as preferências ficam em `%LOCALAPPDATA%\Dogen\settings.json`. Por exemplo,
 o arquivo atualmente versionado no checkout usa `small.en`, 20 pares de contexto e
-desativa a revisão da transcrição.
+desativa a revisão da transcrição. Há um descompasso conhecido no seletor Whisper de
+Settings: ele não lista `base`; ao abrir Settings com esse fallback, o controle mostra
+`tiny.en`, e salvar as configurações grava essa escolha. Confira o modelo antes de salvar.
 
 O registro opcional de confiabilidade pode ser ligado em **Settings → Privacy**. Ele fica
 na pasta de dados locais do usuário como `diagnostics.log`, é limitado a 512 KB mais duas
