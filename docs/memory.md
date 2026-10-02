@@ -41,9 +41,10 @@ No bundle Windows do PyInstaller, Coqui precisa dos arquivos-fonte em
 `ko_speech_tools` também exige os recursos do namespace `ko_speech_tools.data` usados
 por `importlib.resources`. O verificador do build compara os recursos relativos ao
 pacote instalado no ambiente de build com o bundle, sem depender do caminho daquela
-máquina. `TTS.vocoder.layers.wavegrad` também deve ser extraído como fonte: o módulo
-define funções `torch.jit.script`, cujo import precisa ler o `.py` fisicamente. O build
-verifica e executa esse módulo no arquivo extraído para detectar omissões ou corrupção.
+máquina. `TTS.vocoder.layers.wavegrad` e `TTS.tts.layers.generic.wavenet` também devem ser
+extraídos como fontes: ambos definem funções `torch.jit.script`, cujo import precisa ler
+o `.py` fisicamente. O build verifica e executa os dois módulos extraídos para detectar
+omissões ou corrupção.
 
 Falhas de carregamento detectadas pelo worker deixam a mensagem e permitem `Retry loading`
 depois de corrigir a causa; falhas de um turno voltam ao modo de gravação e preservam o
