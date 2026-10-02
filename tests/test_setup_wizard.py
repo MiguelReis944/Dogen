@@ -57,6 +57,55 @@ def test_setup_wizard_can_open_without_blocking_on_model_checks(monkeypatch):
     app.processEvents()
 
 
+def test_inspection_does_not_show_completed_progress_when_voice_is_missing(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(SetupWizard, "_start_operation", lambda *args: None)
+    wizard = SetupWizard(AppConfig())
+
+    wizard._show_inspection({
+        "whisper_ready": True,
+        "whisper_error": "",
+        "tts_ready": False,
+        "tts_error": "",
+        "models": ["llama3.2:3b"],
+        "ollama_error": "",
+    })
+
+    assert wizard.tts_status.text() == "Needs download"
+    assert wizard.progress_bar.isHidden()
+    assert wizard.prepare_speech_button.isEnabled()
+    wizard.close()
+    app.processEvents()
+
+
+def test_prepare_failure_remains_visible_after_refreshing_model_status(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(SetupWizard, "_start_operation", lambda *args: None)
+    wizard = SetupWizard(AppConfig())
+    wizard._worker_result = {
+        "operation": "prepare_speech",
+        "ok": False,
+        "error": "No module named 'transformers'",
+    }
+
+    wizard._on_worker_finished()
+    wizard._show_inspection({
+        "whisper_ready": True,
+        "whisper_error": "",
+        "tts_ready": False,
+        "tts_error": "",
+        "models": ["llama3.2:3b"],
+        "ollama_error": "",
+    })
+
+    assert wizard.progress_label.text() == (
+        "Could not prepare speech models: No module named 'transformers'"
+    )
+    assert wizard.tts_status.text() == "Needs download"
+    wizard.close()
+    app.processEvents()
+
+
 def test_ollama_model_pull_uses_a_timeout_and_closes_on_cancellation(monkeypatch):
     client_state = {}
 

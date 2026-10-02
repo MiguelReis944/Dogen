@@ -195,6 +195,7 @@ class SetupWizard(QDialog):
         self.config = config
         self._worker = None
         self._worker_result = None
+        self._pending_speech_result = None
         self._close_requested = False
         self._speech_models_ready = False
         self._ollama_models = []
@@ -277,10 +278,10 @@ class SetupWizard(QDialog):
         self.download_model_button.setEnabled(not busy and self._ollama_reachable)
         self.continue_button.setEnabled(not busy)
         if busy:
+            self.progress_bar.show()
             self.progress_bar.setRange(0, 0)
         else:
-            self.progress_bar.setRange(0, 100)
-            self.progress_bar.setValue(100)
+            self.progress_bar.hide()
 
     def _start_operation(self, operation, model=""):
         self._set_busy(True)
@@ -315,10 +316,7 @@ class SetupWizard(QDialog):
         if operation == "inspect":
             self._show_inspection(result)
         elif operation == "prepare_speech":
-            self.progress_label.setText(
-                "Speech models are ready."
-                if result.get("ok") else f"Could not prepare speech models: {result.get('error', 'unknown error')}"
-            )
+            self._pending_speech_result = result
             self._inspect()
         elif operation == "pull_model":
             if result.get("cancelled"):
@@ -368,6 +366,22 @@ class SetupWizard(QDialog):
             )
         if self._speech_models_ready and self._ollama_models:
             self.hide_next_time.setChecked(True)
+        if self._pending_speech_result is not None:
+            prepared = self._pending_speech_result
+            self._pending_speech_result = None
+            if not prepared.get("ok"):
+                message = (
+                    "Could not prepare speech models: "
+                    f"{prepared.get('error', 'unknown error')}"
+                )
+            elif self._speech_models_ready:
+                message = "Speech models are ready."
+            else:
+                message = (
+                    "Preparation finished, but a speech model is still missing. "
+                    "Try Prepare speech models again."
+                )
+            self.progress_label.setText(message)
         self._set_busy(False)
 
     def _set_models(self, names):
