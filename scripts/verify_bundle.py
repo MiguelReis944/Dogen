@@ -1,4 +1,4 @@
-"""Check frozen Coqui TTS config sources and speech-tool data resources."""
+"""Check frozen Coqui sources and speech-tool data needed by the runtime."""
 
 import argparse
 import runpy

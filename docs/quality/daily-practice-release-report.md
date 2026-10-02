@@ -133,6 +133,29 @@
   on the user's RX 7600 8 GB. A model left resident by an earlier app version can be seen
   in the menu; freeing it requires the confirmed action or restarting the Ollama service.
 
+## Installer and runtime recovery follow-up — 2026-10-01
+
+- The previous frozen application bundle is missing `TTS/vocoder/layers/wavegrad.py`.
+  The old-bundle verifier reproduced this packaging failure; it is a likely cause of the
+  reported startup error, though the installed app's full traceback was not captured.
+- The PyInstaller spec now preserves the physical TorchScript source. Bundle validation
+  checks and executes that source in addition to checking the Coqui config files and
+  Korean speech-tool data. The full Windows build's frozen resource smoke test passed.
+- Startup/model errors now include a recovery action and allow retry after the worker
+  stops. Turn errors remain visible and allow the user to record another turn instead of
+  leaving the app disabled.
+- The new installer compiled successfully as
+  `build/installer/Dogen-Setup.exe` (205,251,517 bytes). The previous app folder and
+  installer are preserved under `build/previous-release-before-wavegrad/` for rollback.
+- Verification: `python -m pytest -q -p no:cacheprovider` — 293 passed in 31.95s;
+  bundle validation reports 10 Coqui vocoder configs, 1 TorchScript source, and 13
+  Korean speech-tool data files; the frozen Korean-resource smoke test, Inno Setup
+  compilation, `pip check`, and `git diff --check` passed. Independent code review found
+  no Critical or Important findings.
+- The installer has not yet been manually installed and exercised on another Windows
+  machine. Actual microphone/TTS/Ollama startup and the Retry action still need user
+  acceptance; a successful package build does not prove every hardware/driver setup.
+
 ## Environment
 
 - Operating system: Windows
@@ -157,9 +180,11 @@ Executed in the Dogen checkout on 2026-10-01:
 
 Result:
 
-- 264 tests passed in 27.19 seconds;
+- 293 tests passed in 31.95 seconds;
 - no broken Python requirements;
-- `ui`, `nlp`, and `tests` compile without syntax errors;
+- the frozen bundle verifier found 10 Coqui vocoder config sources, 1 Coqui TorchScript
+  source, and 13 `ko_speech_tools` data files;
+- the Windows build, frozen Korean-resource smoke test, and installer compilation passed;
 - `git diff --check` reported no whitespace errors (only Git line-ending notices).
 
 The pytest cache plugin is disabled in this checkout to avoid creating `.pytest_cache`. It does not change which tests run.
