@@ -144,9 +144,10 @@
 - Startup/model errors now include a recovery action and allow retry after the worker
   stops. Turn errors remain visible and allow the user to record another turn instead of
   leaving the app disabled.
-- The new installer compiled successfully as
-  `build/installer/Dogen-Setup.exe` (205,251,517 bytes). The previous app folder and
-  installer are preserved under `build/previous-release-before-wavegrad/` for rollback.
+- The first repaired installer compiled successfully as
+  `build/installer/Dogen-Setup.exe` (205,251,517 bytes) and was later preserved under
+  `build/previous-release-before-setup-ui-fix/`. The older pre-WaveGrad-fix app folder
+  and installer remain under `build/previous-release-before-wavegrad/`.
 - Verification: `python -m pytest -q -p no:cacheprovider` — 293 passed in 31.95s;
   bundle validation reports 10 Coqui vocoder configs, 1 TorchScript source, and 13
   Korean speech-tool data files; the frozen Korean-resource smoke test, Inno Setup
@@ -155,6 +156,28 @@
 - The installer has not yet been manually installed and exercised on another Windows
   machine. Actual microphone/TTS/Ollama startup and the Retry action still need user
   acceptance; a successful package build does not prove every hardware/driver setup.
+
+## Setup wizard state follow-up — 2026-10-01
+
+- The **Setup is incomplete** prompt is intentional while a required speech model is
+  missing. The false 100% bar was not a completed-download signal: the wizard set it to
+  100 whenever any background check became idle. It is now shown only while an operation
+  is running and hidden after that operation finishes.
+- A speech-model preparation error was immediately overwritten by the follow-up status
+  inspection. The refreshed Whisper/voice/Ollama states now remain visible while the
+  preparation result is preserved. A success message is shown only if the refreshed
+  check confirms both speech models are ready.
+- Two regression tests failed before the fix and pass afterward. The setup-wizard suite
+  reports 9 passed; the full suite reports 295 passed in 34.40s. Independent review found
+  no Critical, Important, or Minor findings.
+- The rebuilt installer is `build/installer/Dogen-Setup.exe` (205,257,254 bytes). The
+  immediately previous bundle and installer are preserved in
+  `build/previous-release-before-setup-ui-fix/`.
+- The bundle verifier again found 10 Coqui config sources, 1 TorchScript source, and 13
+  Korean speech-tool data files; the frozen resource smoke test and installer compilation
+  passed. Real first-run interaction, model downloads, microphone, and playback still need
+  manual acceptance. If the voice is marked **Needs download**, choose **No** in the
+  incomplete prompt, then choose **Prepare speech models** in the setup guide.
 
 ## Environment
 
@@ -176,11 +199,12 @@ Executed in the Dogen checkout on 2026-10-01:
 ```powershell
 .venv\Scripts\python.exe -m pytest -q -p no:cacheprovider
 .venv\Scripts\python.exe -m pip check
+.venv\Scripts\python.exe scripts\verify_bundle.py build\dist\Dogen
 ```
 
 Result:
 
-- 293 tests passed in 31.95 seconds;
+- 295 tests passed in 34.40 seconds;
 - no broken Python requirements;
 - the frozen bundle verifier found 10 Coqui vocoder config sources, 1 Coqui TorchScript
   source, and 13 `ko_speech_tools` data files;
