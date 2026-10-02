@@ -14,7 +14,8 @@ Para testar sem Python ou `.bat`, use o instalador Windows em `packaging/README.
 Ele instala o Dogen e abre um guia inicial para preparar os modelos de fala e
 conectar um modelo local do Ollama. O Ollama e os pesos dos modelos continuam
 separados; conversas e configurações ficam em `%LOCALAPPDATA%\Dogen` e não são
-apagadas ao desinstalar o aplicativo.
+apagadas ao desinstalar o aplicativo. O guia de empacotamento também documenta a
+recuperação de instalações antigas que falham ao verificar a voz local.
 
 Para setup manual, veja [docs/SETUP.md](docs/SETUP.md).
 
@@ -60,7 +61,7 @@ gera uma indicação de falha; a resposta em texto continua salva e disponível.
 
 ## Sessões
 
-Cada dia começa uma sessão nova. Dentro do mesmo dia, retomar o app continua de onde parou — contexto e histórico são restaurados automaticamente. O histórico fica em `conversations.db`, no diretório do projeto.
+Cada dia começa uma sessão nova. Dentro do mesmo dia, retomar o app continua de onde parou — contexto e histórico são restaurados automaticamente. O histórico fica em `conversations.db`: no diretório do projeto ao executar pelo código-fonte e em `%LOCALAPPDATA%\Dogen` na versão instalada.
 
 ## Progresso local
 
@@ -84,7 +85,7 @@ opinião do LLM não são substitutos honestos.
 | Chave | Padrão | Descrição |
 |---|---|---|
 | `ollama_model` | `mistral` | preferência inicial para seleção; o último modelo escolhido fica salvo localmente |
-| `whisper_model` | `small.en` | modelo Whisper (english-only, melhor precisão) |
+| `whisper_model` | `base` | modelo Whisper inicial para uma configuração nova; pode ser alterado em Settings |
 | `tts_model` | `tts_models/en/ljspeech/tacotron2-DDC` | voz feminina fixa do Coqui TTS |
 | `vad_threshold` | `0.02` | sensibilidade base do detector de voz |
 | `silence_duration_sec` | `2.0` | valor legado preservado para compatibilidade de configuração |
@@ -94,6 +95,13 @@ opinião do LLM não são substitutos honestos.
 | `noise_reduction` | `true` | aplica redução de ruído depois da captura; pode ser desligada para comparar clareza |
 | `diagnostics_enabled` | `false` | grava eventos locais de confiabilidade, sem áudio nem transcrições |
 | `context_size` | `10` | pares de mensagens mantidos em contexto |
+
+Os valores da tabela são os padrões usados quando ainda não existe um arquivo de
+configuração do usuário. Ao executar pelo código-fonte, o Dogen também lê
+`settings.json` na raiz do repositório, que pode sobrescrever esses valores; no
+instalador, as preferências ficam em `%LOCALAPPDATA%\Dogen\settings.json`. Por exemplo,
+o arquivo atualmente versionado no checkout usa `small.en`, 20 pares de contexto e
+desativa a revisão da transcrição.
 
 O registro opcional de confiabilidade pode ser ligado em **Settings → Privacy**. Ele fica
 na pasta de dados locais do usuário como `diagnostics.log`, é limitado a 512 KB mais duas

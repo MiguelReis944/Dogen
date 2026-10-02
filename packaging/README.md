@@ -17,6 +17,12 @@ the app leaves that user data intact.
 
 - If speech recognition or the local voice cannot load, follow the status message. Use
   **File → Setup guide…** to prepare or repair speech models, then select **Retry loading**.
+- If an older installer reports `could not get source code` while checking the English
+  voice, install a build made from the current packaging files. Coqui and `typeguard`
+  inspect Python source during setup; the current build preserves those files and runs
+  the frozen voice-check path before creating the installer. This smoke test verifies
+  imports and setup checks, not voice-model download, synthesis quality, or playback on
+  every audio device.
 - If microphone validation blocks launch before the main window appears, reconnect the
   microphone or correct Windows privacy/device settings, then restart Dogen. If recording
   fails after launch, follow the status message and select **Retry loading** after fixing it.
