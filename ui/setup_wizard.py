@@ -1,10 +1,12 @@
 """First-run setup for packaged Dogen installations."""
 
 from pathlib import Path
+import traceback
 
 from PyQt5.QtCore import QThread, QUrl, pyqtSignal
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -117,21 +119,31 @@ class SetupWorker(QThread):
         }
 
     def _prepare_speech(self):
+        stage = "Speech recognition check"
         try:
             whisper_ready = preflight.check_whisper(self.config.whisper_model)
             if not whisper_ready:
+                stage = "Speech recognition download"
                 self.progress_changed.emit(
                     f"Downloading speech recognition model {self.config.whisper_model}…",
                     None,
                 )
                 preflight.download_whisper(self.config.whisper_model)
+            stage = "English voice check"
             tts_ready = preflight.check_tts(self.config.tts_model)
             if not tts_ready:
+                stage = "English voice download"
                 self.progress_changed.emit("Downloading the English voice model…", None)
                 preflight.download_tts(self.config.tts_model)
             return {"operation": self.operation, "ok": True}
         except Exception as exc:
-            return {"operation": self.operation, "ok": False, "error": str(exc)}
+            return {
+                "operation": self.operation,
+                "ok": False,
+                "stage": stage,
+                "error": str(exc),
+                "traceback": traceback.format_exc(),
+            }
 
     def _pull_model(self):
         client = None
@@ -250,7 +262,13 @@ class SetupWizard(QDialog):
 
         self.progress_label = QLabel("Checking setup…")
         self.progress_label.setWordWrap(True)
-        layout.addWidget(self.progress_label)
+        progress_row = QHBoxLayout()
+        progress_row.addWidget(self.progress_label, stretch=1)
+        self.copy_error_button = QPushButton("Copy error details")
+        self.copy_error_button.clicked.connect(self._copy_error_details)
+        self.copy_error_button.hide()
+        progress_row.addWidget(self.copy_error_button)
+        layout.addLayout(progress_row)
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 0)
         self.progress_bar.setTextVisible(True)
@@ -286,6 +304,8 @@ class SetupWizard(QDialog):
     def _start_operation(self, operation, model=""):
         self._set_busy(True)
         self._worker_result = None
+        self.copy_error_button.hide()
+        self._error_details = ""
         self._worker = SetupWorker(operation, self.config, model, self)
         self._worker.progress_changed.connect(self._on_progress)
         self._worker.result_ready.connect(self._on_result)
@@ -370,10 +390,16 @@ class SetupWizard(QDialog):
             prepared = self._pending_speech_result
             self._pending_speech_result = None
             if not prepared.get("ok"):
-                message = (
-                    "Could not prepare speech models: "
-                    f"{prepared.get('error', 'unknown error')}"
-                )
+                stage = prepared.get("stage", "")
+                stage_text = f" during {stage}" if stage else ""
+                error = prepared.get("error", "unknown error")
+                message = f"Could not prepare speech models{stage_text}: {error}"
+                if prepared.get("traceback"):
+                    self._error_details = (
+                        f"{stage or 'Speech setup'}: {error}\n\n"
+                        f"{prepared['traceback']}"
+                    )
+                    self.copy_error_button.show()
             elif self._speech_models_ready:
                 message = "Speech models are ready."
             else:
@@ -383,6 +409,10 @@ class SetupWizard(QDialog):
                 )
             self.progress_label.setText(message)
         self._set_busy(False)
+
+    def _copy_error_details(self):
+        if self._error_details:
+            QApplication.clipboard().setText(self._error_details)
 
     def _set_models(self, names):
         selected = self.model_combo.currentText().strip() or self.config.ollama_model

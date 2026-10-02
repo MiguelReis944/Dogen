@@ -106,6 +106,59 @@ def test_prepare_failure_remains_visible_after_refreshing_model_status(monkeypat
     app.processEvents()
 
 
+def test_speech_preparation_failure_reports_stage_and_traceback(monkeypatch):
+    worker = SetupWorker("prepare_speech", AppConfig())
+    monkeypatch.setattr("ui.setup_wizard.preflight.check_whisper", lambda _name: True)
+    monkeypatch.setattr("ui.setup_wizard.preflight.check_tts", lambda _name: False)
+
+    def fail_download(_name):
+        raise OSError("could not get source code")
+
+    monkeypatch.setattr("ui.setup_wizard.preflight.download_tts", fail_download)
+
+    result = worker._prepare_speech()
+
+    assert result["ok"] is False
+    assert result["stage"] == "English voice download"
+    assert result["error"] == "could not get source code"
+    assert "fail_download" in result["traceback"]
+
+
+def test_prepare_error_details_can_be_copied_from_setup_wizard(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(SetupWizard, "_start_operation", lambda *args: None)
+    wizard = SetupWizard(AppConfig())
+    wizard._worker_result = {
+        "operation": "prepare_speech",
+        "ok": False,
+        "stage": "English voice download",
+        "error": "could not get source code",
+        "traceback": "Traceback (most recent call last):\nOSError: could not get source code",
+    }
+
+    wizard._on_worker_finished()
+    wizard._show_inspection({
+        "whisper_ready": True,
+        "whisper_error": "",
+        "tts_ready": False,
+        "tts_error": "",
+        "models": ["llama3.2:3b"],
+        "ollama_error": "",
+    })
+    wizard.copy_error_button.click()
+
+    assert wizard.progress_label.text() == (
+        "Could not prepare speech models during English voice download: "
+        "could not get source code"
+    )
+    assert QApplication.clipboard().text() == (
+        "English voice download: could not get source code\n\n"
+        "Traceback (most recent call last):\nOSError: could not get source code"
+    )
+    wizard.close()
+    app.processEvents()
+
+
 def test_ollama_model_pull_uses_a_timeout_and_closes_on_cancellation(monkeypatch):
     client_state = {}
 
